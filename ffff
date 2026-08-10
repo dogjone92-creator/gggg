@@ -6,7 +6,7 @@ local Config = {
 	AutoRejoinBoulders = false,
 	AutoBuyBombs = false,
 	RuneGrabRange = 20,
-	PickRange = 13,A
+	PickRange = 13,
 	PickBurst = 8,
 	AutoSellThreshold = 0.5,
 	MountainCenter = Vector3.new(42.67, 1066.7, 102.2),
@@ -3686,7 +3686,6 @@ do
 		local dryRounds = 0
 		local scanned = false
 		local scanIndex = 0
-		local luckMoveIndex = 0
 		local heldPick
 		local spotFrame
 		local aimTurn = 0
@@ -4450,25 +4449,8 @@ do
 			end
 
 			if phase == "scan" then
-				if not scanned then
-					if scanIndex == 0 then
-						scanIndex = 1
-						waitUntil = now + SCAN_HOLD
-					end
-
-					if scanIndex <= #SCAN_SPOTS then
-						hold(SCAN_SPOTS[scanIndex])
-						statusText = string.format("Scanning %d/%d", scanIndex, #SCAN_SPOTS)
-
-						if now >= waitUntil then
-							scanIndex += 1
-							waitUntil = now + SCAN_HOLD
-						end
-
-						return
-					end
-
-					scanned = true
+				if runBoulderScanMovement(now) then
+					return
 				end
 
 				local model = pickTarget()
@@ -4525,9 +4507,9 @@ do
 							restart()
 							return
 						end
-						if #SCAN_SPOTS > 0 then
-							luckMoveIndex = (luckMoveIndex % #SCAN_SPOTS) + 1
-							hold(SCAN_SPOTS[luckMoveIndex])
+						-- Use the exact same movement routine as Boulder searching.
+						if runBoulderScanMovement(now) then
+							return
 						end
 						waitUntil = now + 0.25
 						statusText = string.format("Searching for Luck ore... %.1fs", LUCK_SEARCH_TIMEOUT - (now - luckSearchStarted))
@@ -4721,6 +4703,8 @@ do
 				if luckTarget then
 					luckTargetStarted = now
 					luckSearchStarted = 0
+					scanned = false
+					scanIndex = 0
 					phase = "luck"
 					statusText = string.format("High Luck crystal found: %.0f", crystalLuck(luckTarget) * 100)
 				else
@@ -4745,6 +4729,27 @@ do
 				statusText = "Searching for boulders..."
 				return
 			end
+		end
+
+		local function runBoulderScanMovement(now)
+			if not scanned then
+				if scanIndex == 0 then
+					scanIndex = 1
+					waitUntil = now + SCAN_HOLD
+				end
+				if scanIndex <= #SCAN_SPOTS then
+					hold(SCAN_SPOTS[scanIndex])
+					statusText = string.format("Scanning %d/%d", scanIndex, #SCAN_SPOTS)
+					if now >= waitUntil then
+						scanIndex += 1
+						waitUntil = now + SCAN_HOLD
+					end
+					return true
+				end
+				scanned = true
+				scanIndex = 0
+			end
+			return false
 		end
 
 		local function setTargets(value)
