@@ -4730,6 +4730,15 @@ do
 			Callback = setActive,
 		})
 
+		FarmBox:AddButton("Run Auto Farm Boulder", function()
+			local entry = Library and Library.Toggles and Library.Toggles.AutoFarmBoulders
+			if entry and entry.SetValue then
+				entry:SetValue(true)
+			else
+				setActive(true)
+			end
+		end)
+
 		FarmBox:AddToggle("AutoRejoinBoulders", {
 			Text = "Auto Rejoin On Finish",
 			Default = Config.AutoRejoinBoulders,
