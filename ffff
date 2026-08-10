@@ -1,5 +1,5 @@
 local Config = {
-	MinCrystalValue = "2m",
+	MinCrystalValue = "1m",
 	SpeedBoost = 35,
 	NormalSpeed = 16,
 	FlySpeed = 100,
@@ -48,7 +48,7 @@ local State = {
 	autoPickupActive = false,
 	instantPromptActive = false,
 	autoBuyBombs = false,
-	minValue = 2000000,
+	minValue = 1000000,
 	valueFilter = true,
 	espScale = 0.7,
 	playerScale = 0.6,
@@ -571,7 +571,12 @@ local function meetsFilter(inst, value)
 	if not State.valueFilter then
 		return true
 	end
-	return (value or crystalValue(inst)) >= State.minValue
+
+	local v = value or crystalValue(inst)
+	local luck = crystalLuck(inst)
+
+	-- Pickup only: 1M+ with Luck 400+ OR 1T+ regardless of Luck.
+	return v >= 1000000000000 or (v >= 1000000 and luck >= 400)
 end
 
 local function ownsGamepass(name)
@@ -1583,7 +1588,7 @@ end)
 local pickupFound = {}
 local pickupSeen = {}
 
-local function pickupCandidates(free, origin, filterFunc, usePickupFilter)
+local function pickupCandidates(free, origin, filterFunc)
 	local found = pickupFound
 	local seen = pickupSeen
 	table.clear(found)
@@ -1611,12 +1616,7 @@ local function pickupCandidates(free, origin, filterFunc, usePickupFilter)
 
 
 		local value = crystalValue(child)
-		if usePickupFilter then
-			local luckPoints = math.floor(crystalLuck(child) * 100 + 0.5)
-			if not (value >= 1000000000000 or (value >= 1000000 and luckPoints >= 400)) then
-				return
-			end
-		elseif not meetsFilter(child, value) then
+		if not meetsFilter(child, value) then
 			return
 		end
 
@@ -1668,6 +1668,18 @@ local function pickupCandidates(free, origin, filterFunc, usePickupFilter)
 	end
 
 	table.sort(found, function(a, b)
+		local aT = a.value >= 1000000000000
+		local bT = b.value >= 1000000000000
+		if aT ~= bT then
+			return aT
+		end
+
+		local aLuck = crystalLuck(a.inst)
+		local bLuck = crystalLuck(b.inst)
+		if aLuck ~= bLuck then
+			return aLuck > bLuck
+		end
+
 		if a.value == b.value then
 			return a.distance < b.distance
 		end
@@ -1826,7 +1838,7 @@ local function instantGrab()
 	end
 end
 
-local function pickupStep(filterFunc, usePickupFilter)
+local function pickupStep(filterFunc)
 	local now = os.clock()
 	if now - State.lastPickup < PICK.cooldown then
 		return
@@ -1852,7 +1864,7 @@ local function pickupStep(filterFunc, usePickupFilter)
 		end
 	end
 
-	local candidatesList = pickupCandidates(free, root.Position, filterFunc, usePickupFilter)
+	local candidatesList = pickupCandidates(free, root.Position, filterFunc)
 	if #candidatesList == 0 then
 		requestStream(root.Position)
 		return
@@ -1977,7 +1989,7 @@ Connections.schedulerConn = Services.RunService.Heartbeat:Connect(function(delta
 	end
 
 	if State.autoPickupActive then
-		local ok, err = pcall(pickupStep, nil, true)
+		local ok, err = pcall(pickupStep)
 		if not ok then
 			reportError("pickup", err)
 		end
@@ -3059,8 +3071,6 @@ do
 			return ok
 		end
 
-		local runBoulderScanMovement
-
 		local function step(deltaTime)
 			if not goalFrame then
 				return
@@ -3221,20 +3231,10 @@ do
 
 		TopBox:AddDivider()
 		TopBox:AddButton("TP Home", function()
-			-- Stop Auto Farm Boulder before teleporting home.
-			local store = Library and Library.Toggles
-			local entry = store and store.AutoFarmBoulders
-			if entry and entry.SetValue then
-				entry:SetValue(false)
-			else
-				-- Fallback: stop the farm directly if the toggle is not ready.
-				if AutoFarmBouldersStop then AutoFarmBouldersStop() end
-			end
-
 			if fireRemote(Remotes.GoHome, "home") then
-				Library:Notify("Auto Farm stopped - Teleporting home", 2)
+				Library:Notify("Teleporting home", 2)
 			else
-				Library:Notify("Auto Farm stopped - Remote unavailable", 2)
+				Library:Notify("Remote unavailable", 2)
 			end
 		end)
 
@@ -3653,9 +3653,11 @@ do
 
 		-- Fallback: when none of the selected boulders can be found,
 		-- collect the highest-Luck crystal with Luck >= 400 first.
+		local FALLBACK_MIN_VALUE = 1e6
 		local FALLBACK_LUCK_POINTS = 400
+		local FALLBACK_ULTRA_VALUE = 1e12
 		local LUCK_SCAN_RANGE = 1000
-		local LUCK_SEARCH_TIMEOUT = 15.0
+		local LUCK_GRAB_TIMEOUT = 25.0
 
 		local PICK_NAMES = {
 			["Rusty Scrapper"] = true, ["Weathered Wood"] = true, ["Chipped Stone"] = true,
@@ -3679,7 +3681,6 @@ do
 		local target, anchor
 		local luckTarget
 		local luckTargetStarted = 0
-		local luckSearchStarted = 0
 		local swingClock = 0
 		local equipClock = 0
 		local waitUntil = 0
@@ -4107,28 +4108,6 @@ do
 			return Move.glide(goal, aim)
 		end
 
-		runBoulderScanMovement = function(now)
-			if not scanned then
-				if scanIndex == 0 then
-					scanIndex = 1
-					waitUntil = now + SCAN_HOLD
-				end
-				if scanIndex <= #SCAN_SPOTS then
-					hold(SCAN_SPOTS[scanIndex])
-					statusText = string.format("Scanning %d/%d", scanIndex, #SCAN_SPOTS)
-					if now >= waitUntil then
-						scanIndex += 1
-						waitUntil = now + SCAN_HOLD
-					end
-					return true
-				end
-				scanned = true
-				scanIndex = 0
-			end
-			return false
-		end
-
-
 		local function restart()
 			task.spawn(function()
 				pcall(function()
@@ -4300,7 +4279,9 @@ do
 				end
 
 				local luckPoints = math.floor(crystalLuck(inst) * 100 + 0.5)
-				if luckPoints < FALLBACK_LUCK_POINTS then
+				local value = tonumber(crystalValue(inst)) or 0
+				local qualifies = (value >= FALLBACK_MIN_VALUE and luckPoints >= FALLBACK_LUCK_POINTS) or (value >= FALLBACK_ULTRA_VALUE)
+				if not qualifies then
 					return
 				end
 
@@ -4314,9 +4295,10 @@ do
 					return
 				end
 
-				if not best or luckPoints > bestLuck or (luckPoints == bestLuck and distance < bestDistance) then
+				local score = value >= FALLBACK_ULTRA_VALUE and (1e18 + value) or (luckPoints * 1e12 + value)
+				if not best or score > bestLuck or (score == bestLuck and distance < bestDistance) then
 					best = inst
-					bestLuck = luckPoints
+					bestLuck = score
 					bestDistance = distance
 				end
 			end
@@ -4417,7 +4399,6 @@ do
 			anchor = nil
 			luckTarget = nil
 			luckTargetStarted = 0
-			luckSearchStarted = 0
 			waitUntil = 0
 			Move.glideStop()
 			hpMark = nil
@@ -4473,84 +4454,99 @@ do
 			end
 
 			if phase == "scan" then
-				-- Always move through the same Boulder scan route first.
-				-- pickTarget() is checked at every scan point.
-				if scanIndex == 0 then
-					scanIndex = 1
-					waitUntil = now + SCAN_HOLD
-				end
+				if not scanned then
+					if scanIndex == 0 then
+						scanIndex = 1
+						waitUntil = now + SCAN_HOLD
+					end
 
-				if scanIndex <= #SCAN_SPOTS then
-					hold(SCAN_SPOTS[scanIndex])
-					statusText = string.format("Searching Boulder %d/%d", scanIndex, #SCAN_SPOTS)
+					if scanIndex <= #SCAN_SPOTS then
+						hold(SCAN_SPOTS[scanIndex])
+						statusText = string.format("Scanning %d/%d", scanIndex, #SCAN_SPOTS)
 
-					local model = pickTarget()
-					if model then
-						scanRetries = 0
-						target = model
-						anchor = visibleAnchor(model) or anchorOf(model)
-						spotFrame = nil
-						spotCenter = nil
-						lockedCenter = nil
-						centerClock = 0
-						spotClock = 0
-						aimTurn = 0
-						blindClock = 0
-						lostClock = 0
-						dryClock = 0
-						probeIndex = 0
-						hpMark = nil
-						dryRounds = 0
-						lastDamageClock = now
-						phase = "mine"
+						if now >= waitUntil then
+							scanIndex += 1
+							waitUntil = now + SCAN_HOLD
+						end
+
 						return
 					end
 
-					if now >= waitUntil then
-						scanIndex += 1
-						waitUntil = now + SCAN_HOLD
+					scanned = true
+				end
+
+				local model = pickTarget()
+				if not model then
+					scanRetries += 1
+					if scanRetries <= 3 then
+						statusText = "Waiting for boulders..."
+						waitUntil = now + 1.5
+						return
 					end
+
+					scanRetries = 0
+					luckTarget, _ = findHighLuckCrystal(root.Position)
+					if luckTarget then
+						luckTargetStarted = now
+						phase = "luck"
+						statusText = string.format("Qualifying crystal found: $%s / Luck %.0f", formatShort(crystalValue(luckTarget), "$"), crystalLuck(luckTarget) * 100)
+						return
+					end
+
+					beginLoot(true)
+					statusText = "No boulder / no qualifying crystal (1M+ & Luck 400+, or 1T+)"
 					return
 				end
 
-				-- Completed one full movement route without a Boulder.
-				scanRetries += 1
-				scanned = false
-				scanIndex = 1
-				waitUntil = now + SCAN_HOLD
-				statusText = string.format("Searching for boulders... (%d)", scanRetries)
+				scanRetries = 0
+				target = model
+				anchor = visibleAnchor(model) or anchorOf(model)
+				spotFrame = nil
+				spotCenter = nil
+				lockedCenter = nil
+				centerClock = 0
+				spotClock = 0
+				aimTurn = 0
+				blindClock = 0
+				lostClock = 0
+				dryClock = 0
+				probeIndex = 0
+				hpMark = nil
+				dryRounds = 0
+				lastDamageClock = now
+				phase = "mine"
 				return
 			end
 
 			if phase == "luck" then
-				-- After a boulder is finished, stay in Luck-ore search only.
-				-- Search for a qualifying ore for up to 15 seconds.
-				-- Once an ore is found, keep trying to collect it until it succeeds.
-				-- Do not search for or switch back to another boulder.
+				-- A selected boulder always has priority. If one appears while travelling
+				-- to a high-Luck crystal, immediately abandon the fallback and mine it.
+				local boulderModel = pickTarget()
+				if boulderModel then
+					target = boulderModel
+					anchor = visibleAnchor(boulderModel) or anchorOf(boulderModel)
+					luckTarget = nil
+					phase = "mine"
+					statusText = "Boulder found - returning to mine"
+					return
+				end
 
 				if not luckTarget or not luckTarget.Parent or getAttr(luckTarget, "Collected") == true then
 					luckTarget = nil
 					luckTarget, _ = findHighLuckCrystal(root.Position)
 					if not luckTarget then
-						if luckSearchStarted == 0 then
-							luckSearchStarted = now
-						end
-						if now - luckSearchStarted >= LUCK_SEARCH_TIMEOUT then
-							statusText = "No Luck ore found - rejoining"
-							stop()
-							restart()
-							return
-						end
-						-- Use the exact same movement routine as Boulder searching.
-						if runBoulderScanMovement(now) then
-							return
-						end
-						waitUntil = now + 0.25
-						statusText = string.format("Searching for Luck ore... %.1fs", LUCK_SEARCH_TIMEOUT - (now - luckSearchStarted))
+						phase = "scan"
+						statusText = "Luck target gone - scanning boulders"
 						return
 					end
 					luckTargetStarted = now
-					luckSearchStarted = 0
+				end
+
+				if now - luckTargetStarted >= LUCK_GRAB_TIMEOUT then
+					luckTarget = nil
+					phase = "scan"
+					statusText = "Luck target timed out - scanning boulders"
+					return
 				end
 
 				local spot = luckTarget.Position
@@ -4559,15 +4555,12 @@ do
 					local prompt = crystalPrompt(luckTarget)
 					if grabCrystal(luckTarget, prompt) then
 						Storage.claimed[luckTarget] = now
-						statusText = string.format("Collected Luck %.0f crystal - searching next", crystalLuck(luckTarget) * 100)
-						luckTarget = nil
-						luckTargetStarted = 0
-						luckSearchStarted = now
+						statusText = string.format("Collecting $%s / Luck %.0f crystal", formatShort(crystalValue(luckTarget), "$"), crystalLuck(luckTarget) * 100)
 						return
 					end
 				end
 
-				statusText = string.format("Trying to collect Luck %.0f crystal", crystalLuck(luckTarget) * 100)
+				statusText = string.format("Going to $%s / Luck %.0f crystal", formatShort(crystalValue(luckTarget), "$"), crystalLuck(luckTarget) * 100)
 				return
 			end
 
@@ -4728,40 +4721,40 @@ do
 					return
 				end
 
-				target = nil
-				anchor = nil
-				pendingFinish = false
-
-				-- After each boulder is finished, scan for the next qualifying Luck ore.
-				luckTarget, _ = findHighLuckCrystal(root.Position)
-				if luckTarget then
-					luckTargetStarted = now
-					luckSearchStarted = 0
-					scanned = false
-					scanIndex = 0
-					phase = "luck"
-					statusText = string.format("High Luck crystal found: %.0f", crystalLuck(luckTarget) * 100)
+				if pendingFinish then
+					phase = "reset"
+					waitUntil = now + RESET_WAIT
+					statusText = "Runes collected"
 				else
-					luckSearchStarted = now
-					waitUntil = now + 0.25
-					phase = "luck"
-					statusText = "Searching for Luck ore..."
+					target = nil
+					anchor = nil
+					phase = "scan"
+					statusText = "Next boulder"
 				end
 
 				return
 			end
 
 			if phase == "reset" then
-				-- Keep searching instead of treating a temporary empty mountain as a finished run.
-				target = nil
-				anchor = nil
-				scanRetries = 0
-				scanned = false
-				scanIndex = 0
-				phase = "scan"
-				waitUntil = now + 3
-				statusText = "Searching for boulders..."
-				return
+				if now < waitUntil then
+					return
+				end
+
+				if autoRejoin then
+					statusText = "Restarting server"
+					Library:Notify("No boulders left - rejoining", 3)
+					stop()
+					restart()
+				else
+					statusText = "Re-scanning mountain..."
+					Library:Notify("No boulders left - re-scanning in 4s", 3)
+					target = nil
+					anchor = nil
+					scanned = false
+					scanIndex = 0
+					phase = "scan"
+					waitUntil = now + 4.0
+				end
 			end
 		end
 
