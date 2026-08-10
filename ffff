@@ -304,7 +304,7 @@ Library.ShowToggleFrameInKeybinds = true
 local Window = Library:CreateWindow({
 	Title = "Mine a Mountain",
 	Footer = "Mine a Mountain | Made by DonnieAzoff",
-	AutoShow = false,
+	AutoShow = true,
 	NotifySide = "Right",
 	ShowCustomCursor = false,
 })
@@ -4737,36 +4737,6 @@ do
 				autoRejoin = value
 			end,
 		})
-
-		-- Master toggle for the whole Boulder Farm group.
-		-- It lives outside FarmBox so it remains clickable when FarmBox is hidden.
-		BoulderBox:AddDivider()
-		BoulderBox:AddToggle("BoulderFarmGroup", {
-			Text = "Boulder Farm",
-			Default = false,
-			Callback = function(value)
-				pcall(function()
-					if FarmBox.Container then
-						FarmBox.Container.Visible = value
-					end
-				end)
-
-				local store = Library and Library.Toggles
-				local autoFarm = store and store.AutoFarmBoulders
-				if autoFarm and autoFarm.SetValue then
-					autoFarm:SetValue(value)
-				else
-					setActive(value)
-				end
-			end,
-		})
-
-		-- Start hidden; the master toggle above reveals it and starts the farm.
-		pcall(function()
-			if FarmBox.Container then
-				FarmBox.Container.Visible = false
-			end
-		end)
 
 		FarmBox:AddDivider()
 
