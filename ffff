@@ -4281,7 +4281,8 @@ do
 
 				local luckPoints = math.floor(crystalLuck(inst) * 100 + 0.5)
 				local value = tonumber(crystalValue(inst)) or 0
-				local qualifies = (value >= FALLBACK_MIN_VALUE and luckPoints >= FALLBACK_LUCK_POINTS) or (value >= FALLBACK_ULTRA_VALUE)
+				-- Before Auto Rejoin we only want crystals with Luck strictly above 400.
+				local qualifies = luckPoints > 400
 				if not qualifies then
 					return
 				end
@@ -4479,24 +4480,11 @@ do
 
 				local model = pickTarget()
 				if not model then
+					-- A Boulder is guaranteed to exist for this round. Keep searching
+					-- until it is actually found instead of treating a missed scan as finished.
 					scanRetries += 1
-					if scanRetries <= 3 then
-						statusText = "Waiting for boulders..."
-						waitUntil = now + 1.5
-						return
-					end
-
-					scanRetries = 0
-					luckTarget, _ = findHighLuckCrystal(root.Position)
-					if luckTarget then
-						luckTargetStarted = now
-						phase = "luck"
-						statusText = string.format("Qualifying crystal found: $%s / Luck %.0f", formatShort(crystalValue(luckTarget), "$"), crystalLuck(luckTarget) * 100)
-						return
-					end
-
-					beginLoot(true)
-					statusText = "No boulder / no qualifying crystal (1M+ & Luck 400+, or 1T+)"
+					statusText = string.format("Searching for Boulder... (%d)", scanRetries)
+					waitUntil = now + 0.5
 					return
 				end
 
@@ -4521,17 +4509,8 @@ do
 			end
 
 			if phase == "luck" then
-				-- A selected boulder always has priority. If one appears while travelling
-				-- to a high-Luck crystal, immediately abandon the fallback and mine it.
-				local boulderModel = pickTarget()
-				if boulderModel then
-					target = boulderModel
-					anchor = visibleAnchor(boulderModel) or anchorOf(boulderModel)
-					luckTarget = nil
-					phase = "mine"
-					statusText = "Boulder found - returning to mine"
-					return
-				end
+				-- Boulder farming is already finished. From here, ignore boulders and
+				-- keep collecting every Luck > 400 crystal before rejoining.
 
 				if not luckTarget or not luckTarget.Parent or getAttr(luckTarget, "Collected") == true then
 					luckTarget = nil
@@ -4553,17 +4532,12 @@ do
 				end
 
 				if now - luckTargetStarted >= LUCK_GRAB_TIMEOUT then
+					-- Do not rejoin just because one crystal took too long. Clear it and
+					-- scan again so the loop can retry until all Luck > 400 crystals are gone.
 					luckTarget = nil
-					if rejoinAfterLuck then
-						rejoinAfterLuck = false
-						statusText = "Luck target timed out - rejoining"
-						Library:Notify("Luck target timed out - rejoining", 3)
-						stop()
-						restart()
-						return
-					end
-					phase = "scan"
-					statusText = "Luck target timed out - scanning boulders"
+					luckTargetStarted = 0
+					waitUntil = now + 0.5
+					statusText = "Retrying Luck crystal search..."
 					return
 				end
 
