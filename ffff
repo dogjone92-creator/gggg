@@ -310,10 +310,9 @@ local Window = Library:CreateWindow({
 })
 
 local Tabs = {
-	crystals = Window:AddTab("Crystals", "gem"),
-	players = Window:AddTab("Players", "users"),
+	-- Boulder replaces the old Crystals tab as the first main tab.
 	boulders = Window:AddTab("Boulders", "mountain"),
-	teleports = Window:AddTab("Teleports", "crosshair"),
+	players = Window:AddTab("Players", "users"),
 	farming = Window:AddTab("Farming", "pickaxe"),
 	movement = Window:AddTab("Movement", "zap"),
 }
@@ -3182,67 +3181,10 @@ do
 	install()
 end
 
-do
-	local function install()
-		local CrystalBox = Tabs.crystals:AddLeftGroupbox("Crystal ESP", "gem")
-
-		CrystalBox:AddToggle("CrystalEsp", {
-			Text = "Crystal ESP",
-			Default = false,
-			Callback = function(value)
-				State.espActive = value
-				if not value then
-					clearEsp()
-				end
-				updateTracking()
-			end,
-		})
-
-		CrystalBox:AddSlider("EspSize", {
-			Text = "Crystal Size",
-			Default = 70,
-			Min = 40,
-			Max = 250,
-			Rounding = 0,
-			Suffix = "%",
-			Compact = false,
-			Callback = function(value)
-				State.espScale = value / 100
-				applyEspScale()
-			end,
-		})
-
-		CrystalBox:AddDivider()
-		CrystalBox:AddLabel("Min Value hides and skips crystals worth less than this. Example: 500k, 2m, 1.5b. Empty shows everything", true)
-
-		local function setMinValue(text)
-			local parsed = parseValue(text)
-			if not parsed then
-				return
-			end
-			State.minValue = math.max(parsed, 0)
-			State.valueFilter = State.minValue > 0
-			requestRefresh()
-		end
-
-		CrystalBox:AddInput("EspMinValue", {
-			Text = "Min Value",
-			Default = Config.MinCrystalValue,
-			Placeholder = "2m",
-			Numeric = false,
-			Finished = false,
-			Callback = setMinValue,
-		})
-
-		StatsLabel = CrystalBox:AddLabel("Tracking: 0  |  Shown: 0")
-	end
-
-	install()
-end
 
 do
 	local function install()
-		local PlayerBox = Tabs.players:AddLeftGroupbox("Player ESP", "users")
+		local PlayerBoxlocal PlayerBox = Tabs.players:AddLeftGroupbox("Player ESP", "users")
 
 		PlayerBox:AddToggle("PlayerEsp", {
 			Text = "Player ESP",
@@ -3302,14 +3244,8 @@ do
 		for _, text in ipairs(Mountain.boulderList()) do
 			BoulderBox:AddLabel(text, true)
 		end
-	end
 
-	install()
-end
-
-do
-	local function install()
-		local TopBox = Tabs.teleports:AddLeftGroupbox("Top Crystals", "trophy")
+		local TopBox = Tabs.boulders:AddLeftGroupbox("Top 1 Crystals", "trophy")
 
 		local function fmtValue(_, score)
 			return formatShort(score, "$")
@@ -3323,113 +3259,22 @@ do
 			return formatWeight(crystalWeight(inst))
 		end
 
-		for rank = 1, 3 do
-			TopBox:AddButton(string.format("Top %d Value", rank), function()
-				tpToRank(crystalValue, rank, fmtValue)
-			end)
-		end
-
-		TopBox:AddDivider()
-
-		for rank = 1, 3 do
-			TopBox:AddButton(string.format("Top %d Luck", rank), function()
-				tpToRank(crystalLuck, rank, fmtLuck)
-			end)
-		end
-
-		TopBox:AddDivider()
-
-		for rank = 1, 3 do
-			TopBox:AddButton(string.format("Top %d Weight", rank), function()
-				tpToRank(crystalWeight, rank, fmtWeight)
-			end)
-		end
-
-		local TeleportBox = Tabs.teleports:AddRightGroupbox("Teleports", "crosshair")
-
-		TeleportBox:AddToggle("AimTeleport", {
-			Text = "Aim Teleport",
-			Default = false,
-			Callback = function(value)
-				State.aimTpEnabled = value
-			end,
-		})
-
-		TeleportBox:AddLabel("Aim Teleport"):AddKeyPicker("AimTeleportKey", {
-			Default = Config.KeybindAimTp,
-			NoUI = false,
-			Text = "Aim Teleport",
-			Mode = "Always",
-		})
-
-		TeleportBox:AddDivider()
-
-		TeleportBox:AddButton("TP Home", function()
-			if fireRemote(Remotes.GoHome, "home") then
-				Library:Notify("Teleporting home", 2)
-			else
-				Library:Notify("Remote unavailable", 2)
-			end
+		TopBox:AddButton("Top 1 Value", function()
+			tpToRank(crystalValue, 1, fmtValue)
 		end)
 
-		TeleportBox:AddButton("Sell All", function()
-			task.spawn(function()
-				local character = LocalPlayer.Character
-				local root = getRoot()
-				local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		TopBox:AddButton("Top 1 Luck", function()
+			tpToRank(crystalLuck, 1, fmtLuck)
+		end)
 
-				if not character or not root then
-					if Library then
-						Library:Notify("Character not found", 2)
-					end
-					return
-				end
-
-				Move.glideStop()
-
-				pcall(function()
-					root.AssemblyLinearVelocity = Vector3.zero
-					root.AssemblyAngularVelocity = Vector3.zero
-				end)
-
-				local sellCFrame = getSellCFrame()
-				applyPivot(sellCFrame)
-
-				task.wait(0.05)
-
-				pcall(function()
-					root.AssemblyLinearVelocity = Vector3.zero
-					root.AssemblyAngularVelocity = Vector3.zero
-					if humanoid then
-						humanoid.PlatformStand = false
-						humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-					end
-				end)
-
-				task.wait(0.15)
-
-				unfavoriteAll()
-				fireRemote(Remotes.SellRequest, "all")
-
-				local things = Services.Workspace:FindFirstChild("Things")
-				local prox = things and things:FindFirstChild("SellProx")
-				local prompt = prox and prox:FindFirstChildOfClass("ProximityPrompt")
-				if prompt then
-					firePrompt(prompt)
-				end
-
-				task.wait(0.25)
-				fireRemote(Remotes.SellRequest, "all")
-
-				if Library then
-					Library:Notify("Teleported to sell station and sold all!", 3)
-				end
-			end)
+		TopBox:AddButton("Top 1 Weight", function()
+			tpToRank(crystalWeight, 1, fmtWeight)
 		end)
 	end
 
 	install()
 end
+
 
 do
 	local function install()
@@ -3839,12 +3684,6 @@ do
 		local EQUIP_STEP = 0.5
 		local RESET_WAIT = 1.5
 
-		-- Fallback: when none of the selected boulders can be found,
-		-- collect the highest-Luck crystal with Luck >= 400 first.
-		local FALLBACK_LUCK_POINTS = 400
-		local LUCK_SCAN_RANGE = 1000
-		local LUCK_GRAB_TIMEOUT = 25.0
-
 		local PICK_NAMES = {
 			["Rusty Scrapper"] = true, ["Weathered Wood"] = true, ["Chipped Stone"] = true,
 			["Hardened Iron"] = true, ["Copper Pick"] = true, ["Reinforced Steel"] = true,
@@ -3861,8 +3700,6 @@ do
 		local targets = {}
 		local phase = "idle"
 		local target, anchor
-		local luckTarget
-		local luckTargetStarted = 0
 		local swingClock = 0
 		local equipClock = 0
 		local waitUntil = 0
@@ -4442,76 +4279,6 @@ do
 			return best, bestAnchor
 		end
 
-		local function findHighLuckCrystal(origin)
-			if not origin then
-				return nil
-			end
-
-			local best, bestLuck, bestDistance
-			local seen = {}
-
-			local function consider(inst)
-				if not inst or seen[inst] or not inst.Parent then
-					return
-				end
-				seen[inst] = true
-
-				if not isCrystal(inst) or getAttr(inst, "Collected") == true then
-					return
-				end
-
-				local luckPoints = math.floor(crystalLuck(inst) * 100 + 0.5)
-				if luckPoints < FALLBACK_LUCK_POINTS then
-					return
-				end
-
-				local distance = (inst.Position - origin).Magnitude
-				if distance > LUCK_SCAN_RANGE then
-					return
-				end
-
-				local free = backpackFree()
-				if crystalWeight(inst) > free then
-					return
-				end
-
-				if not best or luckPoints > bestLuck or (luckPoints == bestLuck and distance < bestDistance) then
-					best = inst
-					bestLuck = luckPoints
-					bestDistance = distance
-				end
-			end
-
-			local hits = nearbyCrystalParts(origin, LUCK_SCAN_RANGE)
-			if hits then
-				for _, part in ipairs(hits) do
-					if part:IsA("BasePart") then
-						consider(part)
-					end
-				end
-			end
-
-			eachContainer(function(container)
-				for _, child in ipairs(container:GetChildren()) do
-					if child:IsA("BasePart") then
-						consider(child)
-					elseif child:IsA("Model") then
-						for _, inner in ipairs(child:GetChildren()) do
-							if inner:IsA("BasePart") then
-								consider(inner)
-							end
-						end
-					end
-				end
-			end)
-
-			for inst in pairs(Storage.registry) do
-				consider(inst)
-			end
-
-			return best, bestLuck
-		end
-
 		local function approach(part, model, turn, spot, pad)
 			local root = getRoot()
 			if not root then
@@ -4576,8 +4343,6 @@ do
 			phase = "idle"
 			target = nil
 			anchor = nil
-			luckTarget = nil
-			luckTargetStarted = 0
 			waitUntil = 0
 			Move.glideStop()
 			hpMark = nil
@@ -4594,8 +4359,6 @@ do
 			stuckClock = 0
 			lastPos = nil
 			lastDamageClock = 0
-			luckTarget = nil
-			luckTargetStarted = 0
 			lockedCenter = nil
 			spotCenter = nil
 			centerClock = 0
@@ -4664,16 +4427,8 @@ do
 					end
 
 					scanRetries = 0
-					luckTarget, _ = findHighLuckCrystal(root.Position)
-					if luckTarget then
-						luckTargetStarted = now
-						phase = "luck"
-						statusText = string.format("High Luck crystal found: %.0f", crystalLuck(luckTarget) * 100)
-						return
-					end
-
 					beginLoot(true)
-					statusText = "No boulder / no Luck 400+ crystal"
+					statusText = "Final rune sweep"
 					return
 				end
 
@@ -4694,52 +4449,6 @@ do
 				dryRounds = 0
 				lastDamageClock = now
 				phase = "mine"
-				return
-			end
-
-			if phase == "luck" then
-				-- A selected boulder always has priority. If one appears while travelling
-				-- to a high-Luck crystal, immediately abandon the fallback and mine it.
-				local boulderModel = pickTarget()
-				if boulderModel then
-					target = boulderModel
-					anchor = visibleAnchor(boulderModel) or anchorOf(boulderModel)
-					luckTarget = nil
-					phase = "mine"
-					statusText = "Boulder found - returning to mine"
-					return
-				end
-
-				if not luckTarget or not luckTarget.Parent or getAttr(luckTarget, "Collected") == true then
-					luckTarget = nil
-					luckTarget, _ = findHighLuckCrystal(root.Position)
-					if not luckTarget then
-						phase = "scan"
-						statusText = "Luck target gone - scanning boulders"
-						return
-					end
-					luckTargetStarted = now
-				end
-
-				if now - luckTargetStarted >= LUCK_GRAB_TIMEOUT then
-					luckTarget = nil
-					phase = "scan"
-					statusText = "Luck target timed out - scanning boulders"
-					return
-				end
-
-				local spot = luckTarget.Position
-				hold(CFrame.new(spot + Vector3.new(0, 3, 0), spot), spot)
-				if (root.Position - spot).Magnitude <= 12 then
-					local prompt = crystalPrompt(luckTarget)
-					if grabCrystal(luckTarget, prompt) then
-						Storage.claimed[luckTarget] = now
-						statusText = string.format("Collecting Luck %.0f crystal", crystalLuck(luckTarget) * 100)
-						return
-					end
-				end
-
-				statusText = string.format("Going to Luck %.0f crystal", crystalLuck(luckTarget) * 100)
 				return
 			end
 
@@ -4973,8 +4682,6 @@ do
 			waitUntil = 0
 			target = nil
 			anchor = nil
-			luckTarget = nil
-			luckTargetStarted = 0
 			lastSpot = nil
 			swingClock = 0
 			equipClock = 0
