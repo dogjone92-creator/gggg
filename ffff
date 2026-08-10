@@ -4471,9 +4471,9 @@ do
 				local model = pickTarget()
 				if not model then
 					scanRetries += 1
-					if scanRetries <= 3 then
+					if scanRetries <= 5 then
 						statusText = "Waiting for boulders..."
-						waitUntil = now + 1.5
+						waitUntil = now + 3
 						return
 					end
 
