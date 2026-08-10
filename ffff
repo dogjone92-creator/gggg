@@ -3214,10 +3214,20 @@ do
 
 		TopBox:AddDivider()
 		TopBox:AddButton("TP Home", function()
-			if fireRemote(Remotes.GoHome, "home") then
-				Library:Notify("Teleporting home", 2)
+			-- Stop Auto Farm Boulder before teleporting home.
+			local store = Library and Library.Toggles
+			local entry = store and store.AutoFarmBoulders
+			if entry and entry.SetValue then
+				entry:SetValue(false)
 			else
-				Library:Notify("Remote unavailable", 2)
+				-- Fallback: stop the farm directly if the toggle is not ready.
+				if AutoFarmBouldersStop then AutoFarmBouldersStop() end
+			end
+
+			if fireRemote(Remotes.GoHome, "home") then
+				Library:Notify("Auto Farm stopped - Teleporting home", 2)
+			else
+				Library:Notify("Auto Farm stopped - Remote unavailable", 2)
 			end
 		end)
 
