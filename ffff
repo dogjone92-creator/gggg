@@ -3059,6 +3059,27 @@ do
 			return ok
 		end
 
+		local function runBoulderScanMovement(now)
+			if not scanned then
+				if scanIndex == 0 then
+					scanIndex = 1
+					waitUntil = now + SCAN_HOLD
+				end
+				if scanIndex <= #SCAN_SPOTS then
+					hold(SCAN_SPOTS[scanIndex])
+					statusText = string.format("Scanning %d/%d", scanIndex, #SCAN_SPOTS)
+					if now >= waitUntil then
+						scanIndex += 1
+						waitUntil = now + SCAN_HOLD
+					end
+					return true
+				end
+				scanned = true
+				scanIndex = 0
+			end
+			return false
+		end
+
 		local function step(deltaTime)
 			if not goalFrame then
 				return
@@ -4729,27 +4750,6 @@ do
 				statusText = "Searching for boulders..."
 				return
 			end
-		end
-
-		local function runBoulderScanMovement(now)
-			if not scanned then
-				if scanIndex == 0 then
-					scanIndex = 1
-					waitUntil = now + SCAN_HOLD
-				end
-				if scanIndex <= #SCAN_SPOTS then
-					hold(SCAN_SPOTS[scanIndex])
-					statusText = string.format("Scanning %d/%d", scanIndex, #SCAN_SPOTS)
-					if now >= waitUntil then
-						scanIndex += 1
-						waitUntil = now + SCAN_HOLD
-					end
-					return true
-				end
-				scanned = true
-				scanIndex = 0
-			end
-			return false
 		end
 
 		local function setTargets(value)
