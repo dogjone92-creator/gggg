@@ -4473,42 +4473,52 @@ do
 			end
 
 			if phase == "scan" then
-				if runBoulderScanMovement(now) then
+				-- Always move through the same Boulder scan route first.
+				-- pickTarget() is checked at every scan point.
+				if scanIndex == 0 then
+					scanIndex = 1
+					waitUntil = now + SCAN_HOLD
+				end
+
+				if scanIndex <= #SCAN_SPOTS then
+					hold(SCAN_SPOTS[scanIndex])
+					statusText = string.format("Searching Boulder %d/%d", scanIndex, #SCAN_SPOTS)
+
+					local model = pickTarget()
+					if model then
+						scanRetries = 0
+						target = model
+						anchor = visibleAnchor(model) or anchorOf(model)
+						spotFrame = nil
+						spotCenter = nil
+						lockedCenter = nil
+						centerClock = 0
+						spotClock = 0
+						aimTurn = 0
+						blindClock = 0
+						lostClock = 0
+						dryClock = 0
+						probeIndex = 0
+						hpMark = nil
+						dryRounds = 0
+						lastDamageClock = now
+						phase = "mine"
+						return
+					end
+
+					if now >= waitUntil then
+						scanIndex += 1
+						waitUntil = now + SCAN_HOLD
+					end
 					return
 				end
 
-				local model = pickTarget()
-				if not model then
-					scanRetries += 1
-
-					-- Re-run the same Boulder search movement:
-					-- walk through SCAN_SPOTS in order, exactly like the
-					-- normal Boulder scan phase, then try pickTarget() again.
-					scanned = false
-					scanIndex = 0
-					waitUntil = now
-
-					statusText = string.format("Searching for boulders... (%d)", scanRetries)
-					return
-				end
-
-				scanRetries = 0
-				target = model
-				anchor = visibleAnchor(model) or anchorOf(model)
-				spotFrame = nil
-				spotCenter = nil
-				lockedCenter = nil
-				centerClock = 0
-				spotClock = 0
-				aimTurn = 0
-				blindClock = 0
-				lostClock = 0
-				dryClock = 0
-				probeIndex = 0
-				hpMark = nil
-				dryRounds = 0
-				lastDamageClock = now
-				phase = "mine"
+				-- Completed one full movement route without a Boulder.
+				scanRetries += 1
+				scanned = false
+				scanIndex = 1
+				waitUntil = now + SCAN_HOLD
+				statusText = string.format("Searching for boulders... (%d)", scanRetries)
 				return
 			end
 
