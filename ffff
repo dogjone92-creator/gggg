@@ -1,5 +1,5 @@
 local Config = {
-	MinCrystalValue = "2m",
+	MinCrystalValue = "1m",
 	SpeedBoost = 35,
 	NormalSpeed = 16,
 	FlySpeed = 100,
@@ -48,7 +48,7 @@ local State = {
 	autoPickupActive = false,
 	instantPromptActive = false,
 	autoBuyBombs = false,
-	minValue = 2000000,
+	minValue = 1000000,
 	valueFilter = true,
 	espScale = 0.7,
 	playerScale = 0.6,
@@ -571,7 +571,12 @@ local function meetsFilter(inst, value)
 	if not State.valueFilter then
 		return true
 	end
-	return (value or crystalValue(inst)) >= State.minValue
+
+	local v = value or crystalValue(inst)
+	local luck = crystalLuck(inst)
+
+	-- Pickup only: 1M+ with Luck 400+ OR 1T+ regardless of Luck.
+	return v >= 1000000000000 or (v >= 1000000 and luck >= 400)
 end
 
 local function ownsGamepass(name)
@@ -1610,11 +1615,8 @@ local function pickupCandidates(free, origin, filterFunc)
 		end
 
 
-		local value = tonumber(crystalValue(child)) or 0
-		local luckPoints = math.floor((tonumber(crystalLuck(child)) or 0) * 100 + 0.5)
-		-- Auto Pickup only accepts: (Value >= 1M and Luck >= 400) OR (Value >= 1T).
-		local qualifies = (value >= 1e6 and luckPoints >= 400) or (value >= 1e12)
-		if not qualifies then
+		local value = crystalValue(child)
+		if not meetsFilter(child, value) then
 			return
 		end
 
@@ -1632,7 +1634,6 @@ local function pickupCandidates(free, origin, filterFunc)
 			inst = child,
 			prompt = crystalPrompt(child),
 			value = value,
-			luck = luckPoints,
 			weight = weight,
 			distance = distance,
 		}
@@ -1667,18 +1668,22 @@ local function pickupCandidates(free, origin, filterFunc)
 	end
 
 	table.sort(found, function(a, b)
-		local aUltra = a.value >= 1e12
-		local bUltra = b.value >= 1e12
-		if aUltra ~= bUltra then
-			return aUltra
+		local aT = a.value >= 1000000000000
+		local bT = b.value >= 1000000000000
+		if aT ~= bT then
+			return aT
 		end
-		if a.luck ~= b.luck then
-			return a.luck > b.luck
+
+		local aLuck = crystalLuck(a.inst)
+		local bLuck = crystalLuck(b.inst)
+		if aLuck ~= bLuck then
+			return aLuck > bLuck
 		end
-		if a.value ~= b.value then
-			return a.value > b.value
+
+		if a.value == b.value then
+			return a.distance < b.distance
 		end
-		return a.distance < b.distance
+		return a.value > b.value
 	end)
 
 	return found
@@ -3226,10 +3231,6 @@ do
 
 		TopBox:AddDivider()
 		TopBox:AddButton("TP Home", function()
-			-- Stop Auto Farm before teleporting home.
-			pcall(function()
-				setActive(false)
-			end)
 			if fireRemote(Remotes.GoHome, "home") then
 				Library:Notify("Teleporting home", 2)
 			else
@@ -4739,62 +4740,14 @@ do
 					return
 				end
 
-				-- A true finish only happens after the farm has:
-				-- 1) found no remaining selected boulder, and
-				-- 2) found no qualifying crystal (1M+ & Luck 400+, or 1T+), and
-				-- 3) completed the final rune-loot window.
-				-- Do not rejoin merely because a single boulder was destroyed.
 				if autoRejoin then
-					statusText = "Run finished - scanning for 20s before restart"
-					Library:Notify("Run finished - scanning for 20 seconds before rejoining", 3)
+					statusText = "Restarting server"
+					Library:Notify("No boulders left - rejoining", 3)
 					stop()
-					task.spawn(function()
-						local deadline = os.clock() + 20
-						statusText = "Scanning boulders + Luck crystals for 20s..."
-						while os.clock() < deadline do
-							if not autoRejoin then
-								return
-							end
-
-							-- Use the exact same boulder target-selection function
-							-- used by the normal Auto Farm scan.
-							local found, foundAnchor = pickTarget()
-							if found and foundAnchor then
-								target = found
-								anchor = foundAnchor
-								scanned = false
-								scanIndex = 0
-								phase = "scan"
-								statusText = "Boulder found - resuming farm"
-								setActive(true)
-								return
-							end
-
-							-- Also use the same qualifying-crystal scanner used by Auto Farm.
-							local root = getRoot()
-							local foundLuck = root and findHighLuckCrystal(root.Position)
-							if foundLuck then
-								luckTarget = foundLuck
-								luckTargetStarted = os.clock()
-								phase = "luck"
-								statusText = "Luck 400+ / qualifying crystal found - resuming farm"
-								setActive(true)
-								return
-							end
-
-							local remaining = math.max(0, deadline - os.clock())
-							statusText = string.format("Scanning boulders + Luck... %.1fs", remaining)
-							task.wait(0.25)
-						end
-
-						if autoRejoin then
-							statusText = "Restarting server"
-							restart()
-						end
-					end)
+					restart()
 				else
-					statusText = "Run finished - re-scanning mountain..."
-					Library:Notify("Run finished - re-scanning in 4s", 3)
+					statusText = "Re-scanning mountain..."
+					Library:Notify("No boulders left - re-scanning in 4s", 3)
 					target = nil
 					anchor = nil
 					scanned = false
@@ -4895,7 +4848,7 @@ do
 		setActive(true)
 
 		FarmBox:AddToggle("AutoRejoinBoulders", {
-			Text = "Auto Rejoin On Finish (Run Complete)",
+			Text = "Auto Rejoin On Finish",
 			Default = Config.AutoRejoinBoulders,
 			Callback = function(value)
 				autoRejoin = value
