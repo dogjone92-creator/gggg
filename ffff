@@ -3214,6 +3214,10 @@ do
 
 		TopBox:AddDivider()
 		TopBox:AddButton("TP Home", function()
+			-- Stop Auto Farm before teleporting home.
+			pcall(function()
+				setActive(false)
+			end)
 			if fireRemote(Remotes.GoHome, "home") then
 				Library:Notify("Teleporting home", 2)
 			else
