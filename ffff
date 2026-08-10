@@ -304,7 +304,7 @@ Library.ShowToggleFrameInKeybinds = true
 local Window = Library:CreateWindow({
 	Title = "Mine a Mountain",
 	Footer = "Mine a Mountain | Made by DonnieAzoff",
-	AutoShow = true,
+	AutoShow = false,
 	NotifySide = "Right",
 	ShowCustomCursor = false,
 })
