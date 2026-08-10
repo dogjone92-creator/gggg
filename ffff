@@ -4471,23 +4471,8 @@ do
 				local model = pickTarget()
 				if not model then
 					scanRetries += 1
-					if scanRetries <= 10 then
-						statusText = "Waiting for boulders..."
-						waitUntil = now + 3
-						return
-					end
-
-					scanRetries = 0
-					luckTarget, _ = findHighLuckCrystal(root.Position)
-					if luckTarget then
-						luckTargetStarted = now
-						phase = "luck"
-						statusText = string.format("High Luck crystal found: %.0f", crystalLuck(luckTarget) * 100)
-						return
-					end
-
-					beginLoot(true)
-					statusText = "No boulder / no Luck 400+ crystal"
+					statusText = string.format("Searching for boulders... (%d)", scanRetries)
+					waitUntil = now + 3
 					return
 				end
 
@@ -4512,24 +4497,15 @@ do
 			end
 
 			if phase == "luck" then
-				-- A selected boulder always has priority. If one appears while travelling
-				-- to a high-Luck crystal, immediately abandon the fallback and mine it.
-				local boulderModel = pickTarget()
-				if boulderModel then
-					target = boulderModel
-					anchor = visibleAnchor(boulderModel) or anchorOf(boulderModel)
-					luckTarget = nil
-					phase = "mine"
-					statusText = "Boulder found - returning to mine"
-					return
-				end
+				-- After a boulder is finished, stay in Luck-ore search only.
+				-- Do not search for or switch back to another boulder.
 
 				if not luckTarget or not luckTarget.Parent or getAttr(luckTarget, "Collected") == true then
 					luckTarget = nil
 					luckTarget, _ = findHighLuckCrystal(root.Position)
 					if not luckTarget then
-						phase = "scan"
-						statusText = "Luck target gone - scanning boulders"
+						waitUntil = now + 3
+						statusText = "Searching for Luck ore..."
 						return
 					end
 					luckTargetStarted = now
@@ -4537,8 +4513,8 @@ do
 
 				if now - luckTargetStarted >= LUCK_GRAB_TIMEOUT then
 					luckTarget = nil
-					phase = "scan"
-					statusText = "Luck target timed out - scanning boulders"
+					waitUntil = now + 3
+					statusText = "Luck target timed out - searching again"
 					return
 				end
 
@@ -4548,7 +4524,9 @@ do
 					local prompt = crystalPrompt(luckTarget)
 					if grabCrystal(luckTarget, prompt) then
 						Storage.claimed[luckTarget] = now
-						statusText = string.format("Collecting Luck %.0f crystal", crystalLuck(luckTarget) * 100)
+						statusText = string.format("Collected Luck %.0f crystal - finished", crystalLuck(luckTarget) * 100)
+						luckTarget = nil
+						phase = "finished"
 						return
 					end
 				end
@@ -4714,40 +4692,36 @@ do
 					return
 				end
 
-				if pendingFinish then
-					phase = "reset"
-					waitUntil = now + RESET_WAIT
-					statusText = "Runes collected"
+				target = nil
+				anchor = nil
+				pendingFinish = false
+
+				-- After each boulder is finished, scan for the next qualifying Luck ore.
+				luckTarget, _ = findHighLuckCrystal(root.Position)
+				if luckTarget then
+					luckTargetStarted = now
+					phase = "luck"
+					statusText = string.format("High Luck crystal found: %.0f", crystalLuck(luckTarget) * 100)
 				else
-					target = nil
-					anchor = nil
-					phase = "scan"
-					statusText = "Next boulder"
+					waitUntil = now + 3
+					phase = "luck"
+					statusText = "No Luck ore - continuing Luck search"
 				end
 
 				return
 			end
 
 			if phase == "reset" then
-				if now < waitUntil then
-					return
-				end
-
-				if autoRejoin then
-					statusText = "Restarting server"
-					Library:Notify("No boulders left - rejoining", 3)
-					stop()
-					restart()
-				else
-					statusText = "Re-scanning mountain..."
-					Library:Notify("No boulders left - re-scanning in 4s", 3)
-					target = nil
-					anchor = nil
-					scanned = false
-					scanIndex = 0
-					phase = "scan"
-					waitUntil = now + 4.0
-				end
+				-- Keep searching instead of treating a temporary empty mountain as a finished run.
+				target = nil
+				anchor = nil
+				scanRetries = 0
+				scanned = false
+				scanIndex = 0
+				phase = "scan"
+				waitUntil = now + 3
+				statusText = "Searching for boulders..."
+				return
 			end
 		end
 
