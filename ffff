@@ -3686,6 +3686,7 @@ do
 		local dryRounds = 0
 		local scanned = false
 		local scanIndex = 0
+		local luckMoveIndex = 0
 		local heldPick
 		local spotFrame
 		local aimTurn = 0
@@ -4473,6 +4474,10 @@ do
 				local model = pickTarget()
 				if not model then
 					scanRetries += 1
+					if #SCAN_SPOTS > 0 then
+						luckMoveIndex = (luckMoveIndex % #SCAN_SPOTS) + 1
+						hold(SCAN_SPOTS[luckMoveIndex])
+					end
 					statusText = string.format("Searching for boulders... (%d)", scanRetries)
 					waitUntil = now + 3
 					return
@@ -4517,6 +4522,10 @@ do
 							restart()
 							return
 						end
+						if #SCAN_SPOTS > 0 then
+							luckMoveIndex = (luckMoveIndex % #SCAN_SPOTS) + 1
+							hold(SCAN_SPOTS[luckMoveIndex])
+						end
 						waitUntil = now + 0.25
 						statusText = string.format("Searching for Luck ore... %.1fs", LUCK_SEARCH_TIMEOUT - (now - luckSearchStarted))
 						return
@@ -4531,9 +4540,10 @@ do
 					local prompt = crystalPrompt(luckTarget)
 					if grabCrystal(luckTarget, prompt) then
 						Storage.claimed[luckTarget] = now
-						statusText = string.format("Collected Luck %.0f crystal - finished", crystalLuck(luckTarget) * 100)
+						statusText = string.format("Collected Luck %.0f crystal - searching next", crystalLuck(luckTarget) * 100)
 						luckTarget = nil
-						phase = "finished"
+						luckTargetStarted = 0
+						luckSearchStarted = now
 						return
 					end
 				end
