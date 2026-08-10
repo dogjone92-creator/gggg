@@ -310,10 +310,8 @@ local Window = Library:CreateWindow({
 })
 
 local Tabs = {
-	crystals = Window:AddTab("Crystals", "gem"),
-	players = Window:AddTab("Players", "users"),
+	-- Boulders is now the first main tab. Teleport controls are inside it.
 	boulders = Window:AddTab("Boulders", "mountain"),
-	teleports = Window:AddTab("Teleports", "crosshair"),
 	farming = Window:AddTab("Farming", "pickaxe"),
 	movement = Window:AddTab("Movement", "zap"),
 }
@@ -3182,100 +3180,12 @@ do
 	install()
 end
 
-do
-	local function install()
-		local CrystalBox = Tabs.crystals:AddLeftGroupbox("Crystal ESP", "gem")
 
-		CrystalBox:AddToggle("CrystalEsp", {
-			Text = "Crystal ESP",
-			Default = false,
-			Callback = function(value)
-				State.espActive = value
-				if not value then
-					clearEsp()
-				end
-				updateTracking()
-			end,
-		})
 
-		CrystalBox:AddSlider("EspSize", {
-			Text = "Crystal Size",
-			Default = 70,
-			Min = 40,
-			Max = 250,
-			Rounding = 0,
-			Suffix = "%",
-			Compact = false,
-			Callback = function(value)
-				State.espScale = value / 100
-				applyEspScale()
-			end,
-		})
-
-		CrystalBox:AddDivider()
-		CrystalBox:AddLabel("Min Value hides and skips crystals worth less than this. Example: 500k, 2m, 1.5b. Empty shows everything", true)
-
-		local function setMinValue(text)
-			local parsed = parseValue(text)
-			if not parsed then
-				return
-			end
-			State.minValue = math.max(parsed, 0)
-			State.valueFilter = State.minValue > 0
-			requestRefresh()
-		end
-
-		CrystalBox:AddInput("EspMinValue", {
-			Text = "Min Value",
-			Default = Config.MinCrystalValue,
-			Placeholder = "2m",
-			Numeric = false,
-			Finished = false,
-			Callback = setMinValue,
-		})
-
-		StatsLabel = CrystalBox:AddLabel("Tracking: 0  |  Shown: 0")
-	end
-
-	install()
-end
 
 do
 	local function install()
-		local PlayerBox = Tabs.players:AddLeftGroupbox("Player ESP", "users")
-
-		PlayerBox:AddToggle("PlayerEsp", {
-			Text = "Player ESP",
-			Default = false,
-			Callback = function(value)
-				State.playerEspActive = value
-				if not value then
-					clearPlayerEsp()
-				end
-			end,
-		})
-
-		PlayerBox:AddSlider("PlayerEspSize", {
-			Text = "Player Size",
-			Default = 60,
-			Min = 40,
-			Max = 250,
-			Rounding = 0,
-			Suffix = "%",
-			Compact = false,
-			Callback = function(value)
-				State.playerScale = value / 100
-				applyPlayerScale()
-			end,
-		})
-	end
-
-	install()
-end
-
-do
-	local function install()
-		local TopBox = Tabs.teleports:AddLeftGroupbox("Top Crystals", "trophy")
+		local TopBox = Tabs.boulders:AddLeftGroupbox("Top Crystals", "trophy")
 
 		local function fmtValue(_, score)
 			return formatShort(score, "$")
@@ -3311,7 +3221,7 @@ do
 			end)
 		end
 
-		local TeleportBox = Tabs.teleports:AddRightGroupbox("Teleports", "crosshair")
+		local TeleportBox = Tabs.boulders:AddRightGroupbox("Teleports", "crosshair")
 
 		TeleportBox:AddToggle("AimTeleport", {
 			Text = "Aim Teleport",
