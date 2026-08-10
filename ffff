@@ -3231,6 +3231,10 @@ do
 
 		TopBox:AddDivider()
 		TopBox:AddButton("TP Home", function()
+			if State.stopBoulderFarm then
+				State.stopBoulderFarm()
+			end
+
 			if fireRemote(Remotes.GoHome, "home") then
 				Library:Notify("Teleporting home", 2)
 			else
@@ -3671,6 +3675,8 @@ do
 		}
 
 		local active = false
+		local firstRunDelay = true
+		local firstRunDelayUntil = 0
 		-- Default to farming every configured boulder type.
 		local autoRejoin = Config.AutoRejoinBoulders
 		local targets = {}
@@ -3698,7 +3704,6 @@ do
 		local probeIndex = 0
 		local partCursor = 0
 		local pendingFinish = false
-		local rejoinAfterLuck = false
 		local lootUntil = 0
 		local statusText = "Idle"
 		local scanRetries = 0
@@ -4281,8 +4286,7 @@ do
 
 				local luckPoints = math.floor(crystalLuck(inst) * 100 + 0.5)
 				local value = tonumber(crystalValue(inst)) or 0
-				-- Before Auto Rejoin we only want crystals with Luck strictly above 400.
-				local qualifies = luckPoints > 400
+				local qualifies = (value >= FALLBACK_MIN_VALUE and luckPoints >= FALLBACK_LUCK_POINTS) or (value >= FALLBACK_ULTRA_VALUE)
 				if not qualifies then
 					return
 				end
@@ -4406,7 +4410,6 @@ do
 			hpMark = nil
 			dryRounds = 0
 			pendingFinish = false
-			rejoinAfterLuck = false
 			lootUntil = 0
 			spotFrame = nil
 			aimTurn = 0
@@ -4430,6 +4433,9 @@ do
 			Move.setFly(toggleValue("Fly"))
 			Move.setNoclip(toggleValue("Noclip"))
 			Mountain.setAutoGrab(toggleValue("AutoRunePickup"))
+
+		-- Expose Boulder Farm stop handler so TP Home can stop it first.
+		State.stopBoulderFarm = stop
 		end
 
 		local function step(deltaTime)
@@ -4480,11 +4486,24 @@ do
 
 				local model = pickTarget()
 				if not model then
-					-- A Boulder is guaranteed to exist for this round. Keep searching
-					-- until it is actually found instead of treating a missed scan as finished.
 					scanRetries += 1
-					statusText = string.format("Searching for Boulder... (%d)", scanRetries)
-					waitUntil = now + 0.5
+					if scanRetries <= 3 then
+						statusText = "Waiting for boulders..."
+						waitUntil = now + 1.5
+						return
+					end
+
+					scanRetries = 0
+					luckTarget, _ = findHighLuckCrystal(root.Position)
+					if luckTarget then
+						luckTargetStarted = now
+						phase = "luck"
+						statusText = string.format("Qualifying crystal found: $%s / Luck %.0f", formatShort(crystalValue(luckTarget), "$"), crystalLuck(luckTarget) * 100)
+						return
+					end
+
+					beginLoot(true)
+					statusText = "No boulder / no qualifying crystal (1M+ & Luck 400+, or 1T+)"
 					return
 				end
 
@@ -4509,21 +4528,22 @@ do
 			end
 
 			if phase == "luck" then
-				-- Boulder farming is already finished. From here, ignore boulders and
-				-- keep collecting every Luck > 400 crystal before rejoining.
+				-- A selected boulder always has priority. If one appears while travelling
+				-- to a high-Luck crystal, immediately abandon the fallback and mine it.
+				local boulderModel = pickTarget()
+				if boulderModel then
+					target = boulderModel
+					anchor = visibleAnchor(boulderModel) or anchorOf(boulderModel)
+					luckTarget = nil
+					phase = "mine"
+					statusText = "Boulder found - returning to mine"
+					return
+				end
 
 				if not luckTarget or not luckTarget.Parent or getAttr(luckTarget, "Collected") == true then
 					luckTarget = nil
 					luckTarget, _ = findHighLuckCrystal(root.Position)
 					if not luckTarget then
-						if rejoinAfterLuck then
-							rejoinAfterLuck = false
-							statusText = "No Luck crystals left - rejoining"
-							Library:Notify("No Luck crystals left - rejoining", 3)
-							stop()
-							restart()
-							return
-						end
 						phase = "scan"
 						statusText = "Luck target gone - scanning boulders"
 						return
@@ -4532,12 +4552,9 @@ do
 				end
 
 				if now - luckTargetStarted >= LUCK_GRAB_TIMEOUT then
-					-- Do not rejoin just because one crystal took too long. Clear it and
-					-- scan again so the loop can retry until all Luck > 400 crystals are gone.
 					luckTarget = nil
-					luckTargetStarted = 0
-					waitUntil = now + 0.5
-					statusText = "Retrying Luck crystal search..."
+					phase = "scan"
+					statusText = "Luck target timed out - scanning boulders"
 					return
 				end
 
@@ -4733,21 +4750,8 @@ do
 				end
 
 				if autoRejoin then
-					luckTarget = nil
-					luckTargetStarted = 0
-					local luck = findHighLuckCrystal(root.Position)
-					if luck then
-						luckTarget = luck
-						luckTargetStarted = now
-						rejoinAfterLuck = true
-						phase = "luck"
-						statusText = "Collecting Luck crystals before rejoin"
-						Library:Notify("Luck crystals found - collecting before rejoin", 3)
-						return
-					end
-
 					statusText = "Restarting server"
-					Library:Notify("No boulders / Luck crystals left - rejoining", 3)
+					Library:Notify("No boulders left - rejoining", 3)
 					stop()
 					restart()
 				else
@@ -4795,6 +4799,11 @@ do
 			end
 
 			active = true
+			if firstRunDelay then
+				firstRunDelay = false
+				firstRunDelayUntil = os.clock() + 15
+				statusText = "Starting Boulder Farm in 15s"
+			end
 			phase = "scan"
 			waitUntil = 0
 			target = nil
@@ -4867,9 +4876,14 @@ do
 
 		Connections.farmConn = Services.RunService.Heartbeat:Connect(function(deltaTime)
 			if active then
-				local ok, err = pcall(step, deltaTime)
-				if not ok then
-					reportError("boulderFarm", err)
+				if firstRunDelayUntil > 0 and os.clock() < firstRunDelayUntil then
+					statusText = string.format("Starting Boulder Farm in %.1fs", firstRunDelayUntil - os.clock())
+				else
+					firstRunDelayUntil = 0
+					local ok, err = pcall(step, deltaTime)
+					if not ok then
+						reportError("boulderFarm", err)
+					end
 				end
 			end
 
