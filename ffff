@@ -3059,26 +3059,7 @@ do
 			return ok
 		end
 
-		local function runBoulderScanMovement(now)
-			if not scanned then
-				if scanIndex == 0 then
-					scanIndex = 1
-					waitUntil = now + SCAN_HOLD
-				end
-				if scanIndex <= #SCAN_SPOTS then
-					hold(SCAN_SPOTS[scanIndex])
-					statusText = string.format("Scanning %d/%d", scanIndex, #SCAN_SPOTS)
-					if now >= waitUntil then
-						scanIndex += 1
-						waitUntil = now + SCAN_HOLD
-					end
-					return true
-				end
-				scanned = true
-				scanIndex = 0
-			end
-			return false
-		end
+		local runBoulderScanMovement
 
 		local function step(deltaTime)
 			if not goalFrame then
@@ -4125,6 +4106,28 @@ do
 		local function hold(goal, aim)
 			return Move.glide(goal, aim)
 		end
+
+		runBoulderScanMovement = function(now)
+			if not scanned then
+				if scanIndex == 0 then
+					scanIndex = 1
+					waitUntil = now + SCAN_HOLD
+				end
+				if scanIndex <= #SCAN_SPOTS then
+					hold(SCAN_SPOTS[scanIndex])
+					statusText = string.format("Scanning %d/%d", scanIndex, #SCAN_SPOTS)
+					if now >= waitUntil then
+						scanIndex += 1
+						waitUntil = now + SCAN_HOLD
+					end
+					return true
+				end
+				scanned = true
+				scanIndex = 0
+			end
+			return false
+		end
+
 
 		local function restart()
 			task.spawn(function()
