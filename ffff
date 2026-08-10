@@ -4750,12 +4750,43 @@ do
 					stop()
 					task.spawn(function()
 						local deadline = os.clock() + 20
+						statusText = "Scanning boulders + Luck crystals for 20s..."
 						while os.clock() < deadline do
 							if not autoRejoin then
 								return
 							end
+
+							-- Use the exact same boulder target-selection function
+							-- used by the normal Auto Farm scan.
+							local found, foundAnchor = pickTarget()
+							if found and foundAnchor then
+								target = found
+								anchor = foundAnchor
+								scanned = false
+								scanIndex = 0
+								phase = "scan"
+								statusText = "Boulder found - resuming farm"
+								setActive(true)
+								return
+							end
+
+							-- Also use the same qualifying-crystal scanner used by Auto Farm.
+							local root = getRoot()
+							local foundLuck = root and findHighLuckCrystal(root.Position)
+							if foundLuck then
+								luckTarget = foundLuck
+								luckTargetStarted = os.clock()
+								phase = "luck"
+								statusText = "Luck 400+ / qualifying crystal found - resuming farm"
+								setActive(true)
+								return
+							end
+
+							local remaining = math.max(0, deadline - os.clock())
+							statusText = string.format("Scanning boulders + Luck... %.1fs", remaining)
 							task.wait(0.25)
 						end
+
 						if autoRejoin then
 							statusText = "Restarting server"
 							restart()
