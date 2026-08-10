@@ -3698,6 +3698,7 @@ do
 		local probeIndex = 0
 		local partCursor = 0
 		local pendingFinish = false
+		local rejoinAfterLuck = false
 		local lootUntil = 0
 		local statusText = "Idle"
 		local scanRetries = 0
@@ -4404,6 +4405,7 @@ do
 			hpMark = nil
 			dryRounds = 0
 			pendingFinish = false
+			rejoinAfterLuck = false
 			lootUntil = 0
 			spotFrame = nil
 			aimTurn = 0
@@ -4535,6 +4537,14 @@ do
 					luckTarget = nil
 					luckTarget, _ = findHighLuckCrystal(root.Position)
 					if not luckTarget then
+						if rejoinAfterLuck then
+							rejoinAfterLuck = false
+							statusText = "No Luck crystals left - rejoining"
+							Library:Notify("No Luck crystals left - rejoining", 3)
+							stop()
+							restart()
+							return
+						end
 						phase = "scan"
 						statusText = "Luck target gone - scanning boulders"
 						return
@@ -4544,6 +4554,14 @@ do
 
 				if now - luckTargetStarted >= LUCK_GRAB_TIMEOUT then
 					luckTarget = nil
+					if rejoinAfterLuck then
+						rejoinAfterLuck = false
+						statusText = "Luck target timed out - rejoining"
+						Library:Notify("Luck target timed out - rejoining", 3)
+						stop()
+						restart()
+						return
+					end
 					phase = "scan"
 					statusText = "Luck target timed out - scanning boulders"
 					return
@@ -4741,8 +4759,21 @@ do
 				end
 
 				if autoRejoin then
+					luckTarget = nil
+					luckTargetStarted = 0
+					local luck = findHighLuckCrystal(root.Position)
+					if luck then
+						luckTarget = luck
+						luckTargetStarted = now
+						rejoinAfterLuck = true
+						phase = "luck"
+						statusText = "Collecting Luck crystals before rejoin"
+						Library:Notify("Luck crystals found - collecting before rejoin", 3)
+						return
+					end
+
 					statusText = "Restarting server"
-					Library:Notify("No boulders left - rejoining", 3)
+					Library:Notify("No boulders / Luck crystals left - rejoining", 3)
 					stop()
 					restart()
 				else
