@@ -3653,7 +3653,7 @@ do
 		-- collect the highest-Luck crystal with Luck >= 400 first.
 		local FALLBACK_LUCK_POINTS = 400
 		local LUCK_SCAN_RANGE = 1000
-		local LUCK_GRAB_TIMEOUT = 25.0
+		local LUCK_SEARCH_TIMEOUT = 15.0
 
 		local PICK_NAMES = {
 			["Rusty Scrapper"] = true, ["Weathered Wood"] = true, ["Chipped Stone"] = true,
@@ -3677,6 +3677,7 @@ do
 		local target, anchor
 		local luckTarget
 		local luckTargetStarted = 0
+		local luckSearchStarted = 0
 		local swingClock = 0
 		local equipClock = 0
 		local waitUntil = 0
@@ -4392,6 +4393,7 @@ do
 			anchor = nil
 			luckTarget = nil
 			luckTargetStarted = 0
+			luckSearchStarted = 0
 			waitUntil = 0
 			Move.glideStop()
 			hpMark = nil
@@ -4498,24 +4500,29 @@ do
 
 			if phase == "luck" then
 				-- After a boulder is finished, stay in Luck-ore search only.
+				-- Search for a qualifying ore for up to 15 seconds.
+				-- Once an ore is found, keep trying to collect it until it succeeds.
 				-- Do not search for or switch back to another boulder.
 
 				if not luckTarget or not luckTarget.Parent or getAttr(luckTarget, "Collected") == true then
 					luckTarget = nil
 					luckTarget, _ = findHighLuckCrystal(root.Position)
 					if not luckTarget then
-						waitUntil = now + 3
-						statusText = "Searching for Luck ore..."
+						if luckSearchStarted == 0 then
+							luckSearchStarted = now
+						end
+						if now - luckSearchStarted >= LUCK_SEARCH_TIMEOUT then
+							statusText = "No Luck ore found - rejoining"
+							stop()
+							restart()
+							return
+						end
+						waitUntil = now + 0.25
+						statusText = string.format("Searching for Luck ore... %.1fs", LUCK_SEARCH_TIMEOUT - (now - luckSearchStarted))
 						return
 					end
 					luckTargetStarted = now
-				end
-
-				if now - luckTargetStarted >= LUCK_GRAB_TIMEOUT then
-					luckTarget = nil
-					waitUntil = now + 3
-					statusText = "Luck target timed out - searching again"
-					return
+					luckSearchStarted = 0
 				end
 
 				local spot = luckTarget.Position
@@ -4531,7 +4538,7 @@ do
 					end
 				end
 
-				statusText = string.format("Going to Luck %.0f crystal", crystalLuck(luckTarget) * 100)
+				statusText = string.format("Trying to collect Luck %.0f crystal", crystalLuck(luckTarget) * 100)
 				return
 			end
 
@@ -4700,12 +4707,14 @@ do
 				luckTarget, _ = findHighLuckCrystal(root.Position)
 				if luckTarget then
 					luckTargetStarted = now
+					luckSearchStarted = 0
 					phase = "luck"
 					statusText = string.format("High Luck crystal found: %.0f", crystalLuck(luckTarget) * 100)
 				else
-					waitUntil = now + 3
+					luckSearchStarted = now
+					waitUntil = now + 0.25
 					phase = "luck"
-					statusText = "No Luck ore - continuing Luck search"
+					statusText = "Searching for Luck ore..."
 				end
 
 				return
