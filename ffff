@@ -3214,20 +3214,10 @@ do
 
 		TopBox:AddDivider()
 		TopBox:AddButton("TP Home", function()
-			-- Stop Auto Farm Boulder before teleporting home.
-			local store = Library and Library.Toggles
-			local entry = store and store.AutoFarmBoulders
-			if entry and entry.SetValue then
-				entry:SetValue(false)
-			else
-				-- Fallback: stop the farm directly if the toggle is not ready.
-				if AutoFarmBouldersStop then AutoFarmBouldersStop() end
-			end
-
 			if fireRemote(Remotes.GoHome, "home") then
-				Library:Notify("Auto Farm stopped - Teleporting home", 2)
+				Library:Notify("Teleporting home", 2)
 			else
-				Library:Notify("Auto Farm stopped - Remote unavailable", 2)
+				Library:Notify("Remote unavailable", 2)
 			end
 		end)
 
@@ -3646,7 +3636,9 @@ do
 
 		-- Fallback: when none of the selected boulders can be found,
 		-- collect the highest-Luck crystal with Luck >= 400 first.
+		local FALLBACK_MIN_VALUE = 1e6
 		local FALLBACK_LUCK_POINTS = 400
+		local FALLBACK_ULTRA_VALUE = 1e12
 		local LUCK_SCAN_RANGE = 1000
 		local LUCK_GRAB_TIMEOUT = 25.0
 
@@ -4270,7 +4262,9 @@ do
 				end
 
 				local luckPoints = math.floor(crystalLuck(inst) * 100 + 0.5)
-				if luckPoints < FALLBACK_LUCK_POINTS then
+				local value = tonumber(crystalValue(inst)) or 0
+				local qualifies = (value >= FALLBACK_MIN_VALUE and luckPoints >= FALLBACK_LUCK_POINTS) or (value >= FALLBACK_ULTRA_VALUE)
+				if not qualifies then
 					return
 				end
 
@@ -4284,9 +4278,10 @@ do
 					return
 				end
 
-				if not best or luckPoints > bestLuck or (luckPoints == bestLuck and distance < bestDistance) then
+				local score = value >= FALLBACK_ULTRA_VALUE and (1e18 + value) or (luckPoints * 1e12 + value)
+				if not best or score > bestLuck or (score == bestLuck and distance < bestDistance) then
 					best = inst
-					bestLuck = luckPoints
+					bestLuck = score
 					bestDistance = distance
 				end
 			end
@@ -4477,12 +4472,12 @@ do
 					if luckTarget then
 						luckTargetStarted = now
 						phase = "luck"
-						statusText = string.format("High Luck crystal found: %.0f", crystalLuck(luckTarget) * 100)
+						statusText = string.format("Qualifying crystal found: $%s / Luck %.0f", formatShort(crystalValue(luckTarget), "$"), crystalLuck(luckTarget) * 100)
 						return
 					end
 
 					beginLoot(true)
-					statusText = "No boulder / no Luck 400+ crystal"
+					statusText = "No boulder / no qualifying crystal (1M+ & Luck 400+, or 1T+)"
 					return
 				end
 
@@ -4543,12 +4538,12 @@ do
 					local prompt = crystalPrompt(luckTarget)
 					if grabCrystal(luckTarget, prompt) then
 						Storage.claimed[luckTarget] = now
-						statusText = string.format("Collecting Luck %.0f crystal", crystalLuck(luckTarget) * 100)
+						statusText = string.format("Collecting $%s / Luck %.0f crystal", formatShort(crystalValue(luckTarget), "$"), crystalLuck(luckTarget) * 100)
 						return
 					end
 				end
 
-				statusText = string.format("Going to Luck %.0f crystal", crystalLuck(luckTarget) * 100)
+				statusText = string.format("Going to $%s / Luck %.0f crystal", formatShort(crystalValue(luckTarget), "$"), crystalLuck(luckTarget) * 100)
 				return
 			end
 
@@ -4728,14 +4723,19 @@ do
 					return
 				end
 
+				-- A true finish only happens after the farm has:
+				-- 1) found no remaining selected boulder, and
+				-- 2) found no qualifying crystal (1M+ & Luck 400+, or 1T+), and
+				-- 3) completed the final rune-loot window.
+				-- Do not rejoin merely because a single boulder was destroyed.
 				if autoRejoin then
-					statusText = "Restarting server"
-					Library:Notify("No boulders left - rejoining", 3)
+					statusText = "Run finished - restarting server"
+					Library:Notify("Run finished - no boulders / qualifying crystals left", 3)
 					stop()
 					restart()
 				else
-					statusText = "Re-scanning mountain..."
-					Library:Notify("No boulders left - re-scanning in 4s", 3)
+					statusText = "Run finished - re-scanning mountain..."
+					Library:Notify("Run finished - re-scanning in 4s", 3)
 					target = nil
 					anchor = nil
 					scanned = false
@@ -4836,7 +4836,7 @@ do
 		setActive(true)
 
 		FarmBox:AddToggle("AutoRejoinBoulders", {
-			Text = "Auto Rejoin On Finish",
+			Text = "Auto Rejoin On Finish (Run Complete)",
 			Default = Config.AutoRejoinBoulders,
 			Callback = function(value)
 				autoRejoin = value
