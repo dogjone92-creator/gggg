@@ -311,7 +311,6 @@ local Window = Library:CreateWindow({
 
 local Tabs = {
 	boulders = Window:AddTab("Boulders", "mountain"),
-	teleports = Window:AddTab("Teleports", "crosshair"),
 	farming = Window:AddTab("Farming", "pickaxe"),
 	movement = Window:AddTab("Movement", "zap"),
 }
@@ -3212,26 +3211,9 @@ do
 			tpToRank(crystalWeight, 1, fmtWeight)
 		end)
 
-		local TeleportBox = Tabs.teleports:AddRightGroupbox("Teleports", "crosshair")
 
-		TeleportBox:AddToggle("AimTeleport", {
-			Text = "Aim Teleport",
-			Default = false,
-			Callback = function(value)
-				State.aimTpEnabled = value
-			end,
-		})
-
-		TeleportBox:AddLabel("Aim Teleport"):AddKeyPicker("AimTeleportKey", {
-			Default = Config.KeybindAimTp,
-			NoUI = false,
-			Text = "Aim Teleport",
-			Mode = "Always",
-		})
-
-		TeleportBox:AddDivider()
-
-		TeleportBox:AddButton("TP Home", function()
+		TopBox:AddDivider()
+		TopBox:AddButton("TP Home", function()
 			if fireRemote(Remotes.GoHome, "home") then
 				Library:Notify("Teleporting home", 2)
 			else
@@ -3239,60 +3221,6 @@ do
 			end
 		end)
 
-		TeleportBox:AddButton("Sell All", function()
-			task.spawn(function()
-				local character = LocalPlayer.Character
-				local root = getRoot()
-				local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-
-				if not character or not root then
-					if Library then
-						Library:Notify("Character not found", 2)
-					end
-					return
-				end
-
-				Move.glideStop()
-
-				pcall(function()
-					root.AssemblyLinearVelocity = Vector3.zero
-					root.AssemblyAngularVelocity = Vector3.zero
-				end)
-
-				local sellCFrame = getSellCFrame()
-				applyPivot(sellCFrame)
-
-				task.wait(0.05)
-
-				pcall(function()
-					root.AssemblyLinearVelocity = Vector3.zero
-					root.AssemblyAngularVelocity = Vector3.zero
-					if humanoid then
-						humanoid.PlatformStand = false
-						humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-					end
-				end)
-
-				task.wait(0.15)
-
-				unfavoriteAll()
-				fireRemote(Remotes.SellRequest, "all")
-
-				local things = Services.Workspace:FindFirstChild("Things")
-				local prox = things and things:FindFirstChild("SellProx")
-				local prompt = prox and prox:FindFirstChildOfClass("ProximityPrompt")
-				if prompt then
-					firePrompt(prompt)
-				end
-
-				task.wait(0.25)
-				fireRemote(Remotes.SellRequest, "all")
-
-				if Library then
-					Library:Notify("Teleported to sell station and sold all!", 3)
-				end
-			end)
-		end)
 	end
 
 	install()
