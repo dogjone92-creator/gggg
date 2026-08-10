@@ -1610,8 +1610,11 @@ local function pickupCandidates(free, origin, filterFunc)
 		end
 
 
-		local value = crystalValue(child)
-		if not meetsFilter(child, value) then
+		local value = tonumber(crystalValue(child)) or 0
+		local luckPoints = math.floor((tonumber(crystalLuck(child)) or 0) * 100 + 0.5)
+		-- Auto Pickup only accepts: (Value >= 1M and Luck >= 400) OR (Value >= 1T).
+		local qualifies = (value >= 1e6 and luckPoints >= 400) or (value >= 1e12)
+		if not qualifies then
 			return
 		end
 
@@ -1629,6 +1632,7 @@ local function pickupCandidates(free, origin, filterFunc)
 			inst = child,
 			prompt = crystalPrompt(child),
 			value = value,
+			luck = luckPoints,
 			weight = weight,
 			distance = distance,
 		}
@@ -1663,10 +1667,18 @@ local function pickupCandidates(free, origin, filterFunc)
 	end
 
 	table.sort(found, function(a, b)
-		if a.value == b.value then
-			return a.distance < b.distance
+		local aUltra = a.value >= 1e12
+		local bUltra = b.value >= 1e12
+		if aUltra ~= bUltra then
+			return aUltra
 		end
-		return a.value > b.value
+		if a.luck ~= b.luck then
+			return a.luck > b.luck
+		end
+		if a.value ~= b.value then
+			return a.value > b.value
+		end
+		return a.distance < b.distance
 	end)
 
 	return found
@@ -4733,10 +4745,22 @@ do
 				-- 3) completed the final rune-loot window.
 				-- Do not rejoin merely because a single boulder was destroyed.
 				if autoRejoin then
-					statusText = "Run finished - restarting server"
-					Library:Notify("Run finished - no boulders / qualifying crystals left", 3)
+					statusText = "Run finished - scanning for 20s before restart"
+					Library:Notify("Run finished - scanning for 20 seconds before rejoining", 3)
 					stop()
-					restart()
+					task.spawn(function()
+						local deadline = os.clock() + 20
+						while os.clock() < deadline do
+							if not autoRejoin then
+								return
+							end
+							task.wait(0.25)
+						end
+						if autoRejoin then
+							statusText = "Restarting server"
+							restart()
+						end
+					end)
 				else
 					statusText = "Run finished - re-scanning mountain..."
 					Library:Notify("Run finished - re-scanning in 4s", 3)
