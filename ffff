@@ -3683,9 +3683,6 @@ do
 		for _, kind in ipairs(FARM_KINDS) do
 			targets[kind] = true
 		end
-		local postBoulderSearchUntil = 0
-		local postBoulderLoot = nil
-		local postBoulderGrabClock = 0
 		local phase = "idle"
 		local target, anchor
 		local luckTarget
@@ -4374,49 +4371,6 @@ do
 			return CFrame.new(center + away * reach + Vector3.new(0, AIM_LIFT[2], 0), center)
 		end
 
-		local function findPostBoulderCrystal(origin)
-			local free = backpackFree()
-			if free <= 0 then return nil end
-
-			local best, bestValue, bestLuck, bestDistance
-			local seen = {}
-
-			local function consider(inst)
-				if not inst or seen[inst] then return end
-				seen[inst] = true
-				if not inst.Parent or not isCrystal(inst) or getAttr(inst, "Collected") == true then return end
-
-				local value = crystalValue(inst)
-				if not meetsFilter(inst, value) then return end
-				if crystalWeight(inst) > free then return end
-
-				local pos = inst.Position
-				if not pos then return end
-				local distance = (pos - origin).Magnitude
-				if distance > COLLECT_RANGE then return end
-
-				local luck = crystalLuck(inst)
-				if not best or value > bestValue or (value == bestValue and luck > bestLuck) or (value == bestValue and luck == bestLuck and distance < bestDistance) then
-					best, bestValue, bestLuck, bestDistance = inst, value, luck, distance
-				end
-			end
-
-			eachContainer(function(container)
-				for _, child in ipairs(container:GetChildren()) do
-					if child:IsA("BasePart") then
-						consider(child)
-					elseif child:IsA("Model") then
-						for _, inner in ipairs(child:GetChildren()) do
-							if inner:IsA("BasePart") then consider(inner) end
-						end
-					end
-				end
-			end)
-
-			for inst in pairs(Storage.registry) do consider(inst) end
-			return best
-		end
-
 		local function beginLoot(finish)
 			pendingFinish = finish == true
 			lootUntil = os.clock() + LOOT_TIME
@@ -4453,9 +4407,6 @@ do
 			spotCenter = nil
 			centerClock = 0
 			spotClock = 0
-			postBoulderSearchUntil = 0
-			postBoulderLoot = nil
-			postBoulderGrabClock = 0
 			table.clear(blacklistedBoulders)
 			statusText = "Idle"
 
@@ -4766,50 +4717,10 @@ do
 				else
 					target = nil
 					anchor = nil
-					postBoulderLoot = nil
-					postBoulderSearchUntil = now + 3.0
-					postBoulderGrabClock = 0
-					phase = "post_boulder_loot"
-					statusText = "Searching crystals 3.0s"
+					phase = "scan"
+					statusText = "Next boulder"
 				end
 
-				return
-			end
-
-			if phase == "post_boulder_loot" then
-				if postBoulderLoot then
-					if not postBoulderLoot.Parent or getAttr(postBoulderLoot, "Collected") == true then
-						postBoulderLoot = nil
-						postBoulderSearchUntil = now + 3.0
-						postBoulderGrabClock = 0
-					else
-						local spot = postBoulderLoot.Position
-						hold(CFrame.new(spot + Vector3.new(0, 5, 0), spot), spot)
-						requestStream(spot)
-						if now - postBoulderGrabClock >= 0.05 then
-							postBoulderGrabClock = now
-							grabCrystal(postBoulderLoot, crystalPrompt(postBoulderLoot))
-						end
-						statusText = string.format("Collecting %s (%s)...", crystalName(postBoulderLoot), formatShort(crystalValue(postBoulderLoot), "$"))
-						return
-					end
-				end
-
-				if now < postBoulderSearchUntil then
-					postBoulderLoot = findPostBoulderCrystal(root.Position)
-					if postBoulderLoot then
-						statusText = string.format("Found %s (%s) - collecting", crystalName(postBoulderLoot), formatShort(crystalValue(postBoulderLoot), "$"))
-						return
-					end
-					statusText = string.format("Searching crystals %.1fs", math.max(0, postBoulderSearchUntil - now))
-					return
-				end
-
-				postBoulderLoot = nil
-				target = nil
-				anchor = nil
-				phase = "scan"
-				statusText = "No qualifying crystal - next boulder"
 				return
 			end
 
@@ -4902,9 +4813,6 @@ do
 			spotCenter = nil
 			centerClock = 0
 			spotClock = 0
-			postBoulderSearchUntil = 0
-			postBoulderLoot = nil
-			postBoulderGrabClock = 0
 			statusText = "Starting"
 
 			Move.setFly(false)
