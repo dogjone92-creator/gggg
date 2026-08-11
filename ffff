@@ -575,8 +575,8 @@ local function meetsFilter(inst, value)
 	local v = value or crystalValue(inst)
 	local luck = crystalLuck(inst)
 
-	-- Pickup only: 1M+ with Luck 400+ OR 1T+ regardless of Luck.
-	return v >= 1000000000000 or (v >= 1000000 and luck >= 400)
+	-- Priority pickup: Luck 400+ OR value 1T+, regardless of the other stat.
+	return luck >= 4.0 or v >= 1000000000000
 end
 
 local function ownsGamepass(name)
@@ -3654,6 +3654,7 @@ do
 		local LOOT_TIME = 2.5
 		local EQUIP_STEP = 0.5
 		local RESET_WAIT = 1.5
+		local CRYSTAL_SCAN_INTERVAL = 3.0
 
 		-- Fallback: when none of the selected boulders can be found,
 		-- collect the highest-Luck crystal with Luck >= 400 first.
@@ -3661,7 +3662,7 @@ do
 		local FALLBACK_LUCK_POINTS = 400
 		local FALLBACK_ULTRA_VALUE = 1e12
 		local LUCK_SCAN_RANGE = 1000
-		local LUCK_GRAB_TIMEOUT = 25.0
+		local LUCK_GRAB_TIMEOUT = 45.0
 
 		local PICK_NAMES = {
 			["Rusty Scrapper"] = true, ["Weathered Wood"] = true, ["Chipped Stone"] = true,
@@ -3690,6 +3691,7 @@ do
 		local target, anchor
 		local luckTarget
 		local luckTargetStarted = 0
+		local crystalScanClock = 0
 		local swingClock = 0
 		local equipClock = 0
 		local waitUntil = 0
@@ -4513,6 +4515,18 @@ do
 					scanned = true
 				end
 
+				-- Mineral priority: scan the whole map every 3 seconds before Boulder selection.
+				if now >= crystalScanClock then
+					crystalScanClock = now + CRYSTAL_SCAN_INTERVAL
+					luckTarget, _ = findHighLuckCrystal(root.Position)
+					if luckTarget then
+						luckTargetStarted = now
+						phase = "luck"
+						statusText = string.format("Mineral priority: $%s / Luck %.0f", formatShort(crystalValue(luckTarget), "$"), crystalLuck(luckTarget) * 100)
+						return
+					end
+				end
+
 				local model = pickTarget()
 				if not model then
 					scanRetries += 1
@@ -4532,7 +4546,7 @@ do
 					end
 
 					beginLoot(true)
-					statusText = "No boulder / no qualifying crystal (1M+ & Luck 400+, or 1T+)"
+					statusText = "No boulder / no qualifying mineral (Luck 400+ or 1T+)"
 					return
 				end
 
@@ -4784,13 +4798,25 @@ do
 						postBoulderGrabClock = 0
 					else
 						local spot = postBoulderLoot.Position
-						hold(CFrame.new(spot + Vector3.new(0, 5, 0), spot), spot)
+						-- Keep the mineral locked as the active target and retry
+						-- until the game confirms that it was actually collected.
+						hold(CFrame.new(spot + Vector3.new(0, 3, 0), spot), spot)
 						requestStream(spot)
-						if now - postBoulderGrabClock >= 0.05 then
-							postBoulderGrabClock = now
-							grabCrystal(postBoulderLoot, crystalPrompt(postBoulderLoot))
+
+						local prompt = crystalPrompt(postBoulderLoot)
+						if prompt then
+							instantPromptPatch(prompt)
 						end
-						statusText = string.format("Collecting %s (%s)...", crystalName(postBoulderLoot), formatShort(crystalValue(postBoulderLoot), "$"))
+
+						if now - postBoulderGrabClock >= 0.10 then
+							postBoulderGrabClock = now
+							local ok = grabCrystal(postBoulderLoot, prompt)
+							if ok then
+								statusText = string.format("Collecting %s (%s) - retrying until collected", crystalName(postBoulderLoot), formatShort(crystalValue(postBoulderLoot), "$"))
+							else
+								statusText = string.format("Retrying %s (%s)...", crystalName(postBoulderLoot), formatShort(crystalValue(postBoulderLoot), "$"))
+							end
+						end
 						return
 					end
 				end
@@ -4809,7 +4835,7 @@ do
 				target = nil
 				anchor = nil
 				phase = "scan"
-				statusText = "No qualifying crystal - next boulder"
+				statusText = "No qualifying mineral - next boulder"
 				return
 			end
 
@@ -4879,6 +4905,7 @@ do
 			anchor = nil
 			luckTarget = nil
 			luckTargetStarted = 0
+			crystalScanClock = 0
 			lastSpot = nil
 			swingClock = 0
 			equipClock = 0
