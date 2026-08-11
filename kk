@@ -3200,6 +3200,7 @@ do
 	local function install()
 		local TopBox = Tabs.boulders:AddLeftGroupbox("Top Crystals", "trophy")
 
+
 		local function fmtValue(_, score)
 			return formatShort(score, "$")
 		end
@@ -6227,10 +6228,19 @@ do
 				else
 					resumeAllWork()
 				end
+
 			end,
 		})
 
 		MasterControlGroup:AddLabel("เปิด = หยุดทั้งหมด | ปิด = ทำงานต่อ", true)
+
+		getgenv().UniverseMasterPauseSet = function(value)
+			if value then
+				pauseAllWork()
+			else
+				resumeAllWork()
+			end
+		end
 
 		local MenuGroup = SettingsTab:AddRightGroupbox("Menu", "wrench")
 
@@ -6332,3 +6342,60 @@ Library:OnUnload(cleanupAll)
 
 -- Expose the existing cleanup routine to the mobile Stop All button.
 State.stopAllAutomation = cleanupAll
+
+
+-- Main-screen Master Pause button
+task.spawn(function()
+	local Players = game:GetService("Players")
+	local player = Players.LocalPlayer
+	local pg = player:WaitForChild("PlayerGui")
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "UniverseMasterPauseScreen"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.DisplayOrder = 1000000
+	gui.Parent = pg
+
+	local button = Instance.new("TextButton")
+	button.Name = "MasterPauseButton"
+	button.Size = UDim2.fromOffset(150, 44)
+	button.Position = UDim2.new(0, 14, 0.5, -22)
+	button.BackgroundTransparency = 0.08
+	button.Text = "▶ ทำงานปกติ"
+	button.TextSize = 16
+	button.TextColor3 = Color3.new(1, 1, 1)
+	button.AutoButtonColor = true
+	button.Parent = gui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = button
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 1.5
+	stroke.Parent = button
+
+	local paused = false
+
+	local function update()
+		if paused then
+			button.Text = "■ หยุดการทำงาน"
+		else
+			button.Text = "▶ ทำงานปกติ"
+		end
+	end
+
+	button.Activated:Connect(function()
+		paused = not paused
+		update()
+
+		local fn = getgenv().UniverseMasterPauseSet
+		if fn then
+			pcall(fn, paused)
+		end
+	end)
+
+	update()
+end)
+
