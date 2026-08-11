@@ -3683,6 +3683,9 @@ do
 		for _, kind in ipairs(FARM_KINDS) do
 			targets[kind] = true
 		end
+		local postBoulderSearchUntil = 0
+		local postBoulderLoot = nil
+		local postBoulderGrabClock = 0
 		local phase = "idle"
 		local target, anchor
 		local luckTarget
@@ -3713,13 +3716,6 @@ do
 		local spotCenter
 		local centerClock = 0
 		local spotClock = 0
-
-		-- After a Boulder reaches 0 HP, scan the whole map for qualifying crystals
-		-- for 3 seconds. If one is found, collect it completely, then start a new
-		-- 3-second search window. The timer never interrupts an active collection.
-		local postBoulderSearchUntil = 0
-		local postBoulderLoot = nil
-		local postBoulderGrabClock = 0
 
 		local function toggleValue(name)
 			local store = Library and Library.Toggles
@@ -4380,48 +4376,28 @@ do
 
 		local function findPostBoulderCrystal(origin)
 			local free = backpackFree()
-			if free <= 0 then
-				return nil
-			end
+			if free <= 0 then return nil end
 
 			local best, bestValue, bestLuck, bestDistance
 			local seen = {}
 
 			local function consider(inst)
-				if not inst or seen[inst] then
-					return
-				end
+				if not inst or seen[inst] then return end
 				seen[inst] = true
-
-				if not inst.Parent or not isCrystal(inst) or getAttr(inst, "Collected") == true then
-					return
-				end
+				if not inst.Parent or not isCrystal(inst) or getAttr(inst, "Collected") == true then return end
 
 				local value = crystalValue(inst)
-				if not meetsFilter(inst, value) then
-					return
-				end
-
-				local weight = crystalWeight(inst)
-				if weight > free then
-					return
-				end
+				if not meetsFilter(inst, value) then return end
+				if crystalWeight(inst) > free then return end
 
 				local pos = inst.Position
-				if not pos then
-					return
-				end
-
+				if not pos then return end
 				local distance = (pos - origin).Magnitude
+				if distance > COLLECT_RANGE then return end
+
 				local luck = crystalLuck(inst)
-				if not best
-					or value > bestValue
-					or (value == bestValue and luck > bestLuck)
-					or (value == bestValue and luck == bestLuck and distance < bestDistance) then
-					best = inst
-					bestValue = value
-					bestLuck = luck
-					bestDistance = distance
+				if not best or value > bestValue or (value == bestValue and luck > bestLuck) or (value == bestValue and luck == bestLuck and distance < bestDistance) then
+					best, bestValue, bestLuck, bestDistance = inst, value, luck, distance
 				end
 			end
 
@@ -4431,18 +4407,13 @@ do
 						consider(child)
 					elseif child:IsA("Model") then
 						for _, inner in ipairs(child:GetChildren()) do
-							if inner:IsA("BasePart") then
-								consider(inner)
-							end
+							if inner:IsA("BasePart") then consider(inner) end
 						end
 					end
 				end
-		end)
+			end)
 
-			for inst in pairs(Storage.registry) do
-				consider(inst)
-			end
-
+			for inst in pairs(Storage.registry) do consider(inst) end
 			return best
 		end
 
@@ -4806,8 +4777,6 @@ do
 			end
 
 			if phase == "post_boulder_loot" then
-				-- Once a qualifying crystal is found, keep collecting it until it is
-				-- actually collected. Only after success do we start another 3-second scan.
 				if postBoulderLoot then
 					if not postBoulderLoot.Parent or getAttr(postBoulderLoot, "Collected") == true then
 						postBoulderLoot = nil
@@ -4817,12 +4786,10 @@ do
 						local spot = postBoulderLoot.Position
 						hold(CFrame.new(spot + Vector3.new(0, 5, 0), spot), spot)
 						requestStream(spot)
-
 						if now - postBoulderGrabClock >= 0.05 then
 							postBoulderGrabClock = now
 							grabCrystal(postBoulderLoot, crystalPrompt(postBoulderLoot))
 						end
-
 						statusText = string.format("Collecting %s (%s)...", crystalName(postBoulderLoot), formatShort(crystalValue(postBoulderLoot), "$"))
 						return
 					end
@@ -4834,7 +4801,6 @@ do
 						statusText = string.format("Found %s (%s) - collecting", crystalName(postBoulderLoot), formatShort(crystalValue(postBoulderLoot), "$"))
 						return
 					end
-
 					statusText = string.format("Searching crystals %.1fs", math.max(0, postBoulderSearchUntil - now))
 					return
 				end
@@ -4936,6 +4902,9 @@ do
 			spotCenter = nil
 			centerClock = 0
 			spotClock = 0
+			postBoulderSearchUntil = 0
+			postBoulderLoot = nil
+			postBoulderGrabClock = 0
 			statusText = "Starting"
 
 			Move.setFly(false)
@@ -5461,6 +5430,7 @@ do
 							end
 						end
 					end
+				end
 			end)
 
 			for inst in pairs(Storage.registry) do
@@ -5495,9 +5465,6 @@ do
 			plantReturnCFrame = nil
 			heldPick = nil
 			statusText = "Idle"
-			postBoulderSearchUntil = 0
-			postBoulderLoot = nil
-			postBoulderGrabClock = 0
 
 			Move.setFly(toggleValue("Fly"))
 			Move.setNoclip(toggleValue("Noclip"))
