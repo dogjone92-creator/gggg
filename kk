@@ -6131,6 +6131,107 @@ do
 			AutoloadLabel:SetText("Current autoload config: none")
 		end)
 
+
+		local MasterControlGroup = SettingsTab:AddLeftGroupbox("Master Control", "power")
+		local masterPaused = false
+		local savedToggleStates = {}
+
+		local masterToggleNames = {
+			"AutoFarmBoulders",
+			"AutoFarmMoney",
+			"AutoPickup",
+			"InstantPrompt",
+			"AutoRunePickup",
+			"SpeedBoost",
+			"Noclip",
+			"InfJump",
+			"Fly",
+			"AutoRejoinBoulders",
+			"FocusLuckCrystals",
+			"AutoPlantLuckCrystals",
+			"MoneyAutoSell",
+			"AutoBuyBombs",
+		}
+
+		local function toggleValue(name)
+			local entry = Library and Library.Toggles and Library.Toggles[name]
+			if not entry then
+				return false
+			end
+			local ok, value = pcall(function()
+				return entry.Value
+			end)
+			return ok and value == true
+		end
+
+		local function setToggle(name, value)
+			local entry = Library and Library.Toggles and Library.Toggles[name]
+			if entry and entry.SetValue then
+				pcall(function()
+					entry:SetValue(value)
+				end)
+			end
+		end
+
+		local function pauseAllWork()
+			if masterPaused then
+				return
+			end
+
+			masterPaused = true
+			table.clear(savedToggleStates)
+
+			-- Save the exact state of every automation toggle.
+			for _, name in ipairs(masterToggleNames) do
+				savedToggleStates[name] = toggleValue(name)
+			end
+
+			-- Turn off only toggles that were actually running.
+			for name, wasOn in pairs(savedToggleStates) do
+				if wasOn then
+					setToggle(name, false)
+				end
+			end
+
+			-- Stop any current movement/teleport immediately.
+			pcall(finishTeleport)
+			pcall(setSpeedBoost, false)
+
+			Library:Notify("หยุดการทำงานทั้งหมดแล้ว", 2)
+		end
+
+		local function resumeAllWork()
+			if not masterPaused then
+				return
+			end
+
+			masterPaused = false
+
+			-- Restore exactly what was enabled before pressing Pause.
+			for name, wasOn in pairs(savedToggleStates) do
+				if wasOn then
+					setToggle(name, true)
+				end
+			end
+
+			table.clear(savedToggleStates)
+			Library:Notify("กลับมาทำงานตามปกติแล้ว", 2)
+		end
+
+		MasterControlGroup:AddToggle("MasterPause", {
+			Text = "หยุดการทำงานทั้งหมด",
+			Default = false,
+			Callback = function(value)
+				if value then
+					pauseAllWork()
+				else
+					resumeAllWork()
+				end
+			end,
+		})
+
+		MasterControlGroup:AddLabel("เปิด = หยุดทั้งหมด | ปิด = ทำงานต่อ", true)
+
 		local MenuGroup = SettingsTab:AddRightGroupbox("Menu", "wrench")
 
 		MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
@@ -6231,215 +6332,3 @@ Library:OnUnload(cleanupAll)
 
 -- Expose the existing cleanup routine to the mobile Stop All button.
 State.stopAllAutomation = cleanupAll
-
--- Mobile / PC Floating UI Toggle
--- Starts hidden. Tap/click the floating button to show/hide the complete UI.
-task.spawn(function()
-    local Players = game:GetService("Players")
-    local UserInputService = game:GetService("UserInputService")
-    local player = Players.LocalPlayer
-
-    local visible = false
-    local buttonGui
-    local toggleButton
-
-    local function isScriptGui(gui)
-        if not gui or not gui:IsA("ScreenGui") then return false end
-        if gui == buttonGui or gui.Name == "MobileFloatingToggle" then return false end
-
-        local foundTitle = false
-        pcall(function()
-            for _, d in ipairs(gui:GetDescendants()) do
-                if d:IsA("TextLabel") or d:IsA("TextButton") then
-                    local t = string.lower(tostring(d.Text or ""))
-                    if string.find(t, "mine a mountain", 1, true) then
-                        foundTitle = true
-                        break
-                    end
-                end
-            end
-        end)
-        if foundTitle then return true end
-
-        local n = string.lower(gui.Name)
-        local hints = {"boulder","mineral","farm","rune","luck","universe","firstfile","tp","home","script","linoria"}
-        for _, hint in ipairs(hints) do
-            if string.find(n, hint, 1, true) then return true end
-        end
-        return false
-    end
-
-    local function setMainUI(state)
-        visible = state
-
-        local containers = {}
-        local pg = player:FindFirstChildOfClass("PlayerGui")
-        if pg then table.insert(containers, pg) end
-        local cg = game:GetService("CoreGui")
-        if cg then table.insert(containers, cg) end
-
-        for _, container in ipairs(containers) do
-            for _, gui in ipairs(container:GetChildren()) do
-                if isScriptGui(gui) then
-                    pcall(function() gui.Enabled = state end)
-                end
-            end
-        end
-
-        if toggleButton then
-            toggleButton.Text = state and "✕" or "☰"
-        end
-    end
-
-    local function createFloatingButton()
-        local pg = player:WaitForChild("PlayerGui")
-
-        buttonGui = Instance.new("ScreenGui")
-        buttonGui.Name = "MobileFloatingToggle"
-        buttonGui.ResetOnSpawn = false
-        buttonGui.IgnoreGuiInset = true
-        buttonGui.DisplayOrder = 999999
-        buttonGui.Parent = pg
-
-        toggleButton = Instance.new("TextButton")
-        toggleButton.Name = "ToggleButton"
-        toggleButton.Size = UDim2.fromOffset(52, 52)
-        toggleButton.Position = UDim2.new(1, -72, 0.5, -26)
-        toggleButton.AnchorPoint = Vector2.new(0, 0)
-        toggleButton.BackgroundTransparency = 0.15
-        toggleButton.Text = "☰"
-        toggleButton.TextSize = 25
-        toggleButton.TextColor3 = Color3.new(1, 1, 1)
-        toggleButton.AutoButtonColor = true
-        toggleButton.Parent = buttonGui
-
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(1, 0)
-        corner.Parent = toggleButton
-
-        local stroke = Instance.new("UIStroke")
-        stroke.Thickness = 2
-        stroke.Parent = toggleButton
-
-        -- Separate Stop All button.
-        local stopButton = Instance.new("TextButton")
-        stopButton.Name = "StopAllButton"
-        stopButton.Size = UDim2.fromOffset(52, 52)
-        stopButton.Position = UDim2.new(1, -136, 0.5, -26)
-        stopButton.BackgroundTransparency = 0.15
-        stopButton.Text = "■"
-        stopButton.TextSize = 24
-        stopButton.TextColor3 = Color3.new(1, 1, 1)
-        stopButton.AutoButtonColor = true
-        stopButton.Parent = buttonGui
-
-        local stopCorner = Instance.new("UICorner")
-        stopCorner.CornerRadius = UDim.new(1, 0)
-        stopCorner.Parent = stopButton
-
-        local stopStroke = Instance.new("UIStroke")
-        stopStroke.Thickness = 2
-        stopStroke.Parent = stopButton
-
-        stopButton.Activated:Connect(function()
-            -- Use the script's existing shutdown functions.
-            if State.stopBoulderFarm then
-                pcall(State.stopBoulderFarm)
-            end
-            if State.stopAllAutomation then
-                pcall(State.stopAllAutomation)
-            end
-
-            -- Disable the common automation toggles as well.
-            State.afkRunning = false
-            State.espActive = false
-            State.playerEspActive = false
-            State.aimTpEnabled = false
-            State.speedActive = false
-            State.autoPickupActive = false
-            State.instantPromptActive = false
-            State.autoBuyBombs = false
-
-            stopButton.Text = "✓"
-            task.delay(1, function()
-                if stopButton and stopButton.Parent then
-                    stopButton.Text = "■"
-                end
-            end)
-        end)
-
-        -- Drag/touch support so the buttons can be moved anywhere on screen.
-        local dragging = false
-        local dragStart
-        local startPos
-        local moved = false
-
-        local function update(input)
-            local delta = input.Position - dragStart
-            if delta.Magnitude > 6 then
-                moved = true
-            end
-
-            toggleButton.Position = UDim2.new(
-                startPos.X.Scale,
-                startPos.X.Offset + delta.X,
-                startPos.Y.Scale,
-                startPos.Y.Offset + delta.Y
-            )
-        end
-
-        toggleButton.Activated:Connect(function()
-            if not moved then
-                setMainUI(not visible)
-            end
-        end)
-
-        toggleButton.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.Touch
-                or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = true
-                moved = false
-                dragStart = input.Position
-                startPos = toggleButton.Position
-
-                input.Changed:Connect(function()
-                    if input.UserInputState == Enum.UserInputState.End then
-                        dragging = false
-                    end
-                end)
-            end
-        end)
-
-        UserInputService.InputChanged:Connect(function(input)
-            if dragging and (
-                input.UserInputType == Enum.UserInputType.Touch
-                or input.UserInputType == Enum.UserInputType.MouseMovement
-            ) then
-                update(input)
-            end
-        end)
-    end
-
-    createFloatingButton()
-
-    -- Start with all main UI hidden.
-    task.wait(0.25)
-    setMainUI(false)
-
-    -- Hide newly-created script UI while the menu is closed.
-    local pg = player:WaitForChild("PlayerGui")
-    local cg = game:GetService("CoreGui")
-
-    local function watchContainer(container)
-        container.ChildAdded:Connect(function(gui)
-            if not visible and isScriptGui(gui) then
-                task.defer(function()
-                    pcall(function() gui.Enabled = false end)
-                end)
-            end
-        end)
-    end
-
-    watchContainer(pg)
-    watchContainer(cg)
-end)
