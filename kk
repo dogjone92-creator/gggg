@@ -12,7 +12,7 @@ local Config = {
 	MountainCenter = Vector3.new(42.67, 1066.7, 102.2),
 	MountainRadius = 862.7,
 	RemotesFolder = "Remotes",
-	KeybindMenu = "RightControl",
+	KeybindMenu = "F1",
 	KeybindAimTp = "F",
 }
 
@@ -575,8 +575,8 @@ local function meetsFilter(inst, value)
 	local v = value or crystalValue(inst)
 	local luck = crystalLuck(inst)
 
-	-- Priority pickup: Luck 400+ OR value 1T+, regardless of the other stat.
-	return luck >= 4.0 or v >= 1000000000000
+	-- Priority pickup: Luck 600+ OR value 1T+, regardless of the other stat.
+	return luck >= 6.0 or v >= 1000000000000
 end
 
 local function ownsGamepass(name)
@@ -3200,7 +3200,6 @@ do
 	local function install()
 		local TopBox = Tabs.boulders:AddLeftGroupbox("Top Crystals", "trophy")
 
-
 		local function fmtValue(_, score)
 			return formatShort(score, "$")
 		end
@@ -3660,7 +3659,7 @@ do
 		-- Fallback: when none of the selected boulders can be found,
 		-- collect the highest-Luck crystal with Luck >= 400 first.
 		local FALLBACK_MIN_VALUE = 1e6
-		local FALLBACK_LUCK_POINTS = 400
+		local FALLBACK_LUCK_POINTS = 600
 		local FALLBACK_ULTRA_VALUE = 1e12
 		local LUCK_SCAN_RANGE = 1000
 		local LUCK_GRAB_TIMEOUT = 45.0
@@ -4547,7 +4546,7 @@ do
 					end
 
 					beginLoot(true)
-					statusText = "No boulder / no qualifying mineral (Luck 400+ or 1T+)"
+					statusText = "No boulder / no qualifying mineral (Luck 600+ or 1T+)"
 					return
 				end
 
@@ -4897,7 +4896,7 @@ do
 			active = true
 			if firstRunDelay then
 				firstRunDelay = false
-				firstRunDelayUntil = os.clock() + 10
+				firstRunDelayUntil = os.clock() + 15
 				statusText = "Starting Boulder Farm in 15s"
 			end
 			phase = "scan"
@@ -6132,116 +6131,6 @@ do
 			AutoloadLabel:SetText("Current autoload config: none")
 		end)
 
-
-		local MasterControlGroup = SettingsTab:AddLeftGroupbox("Master Control", "power")
-		local masterPaused = false
-		local savedToggleStates = {}
-
-		local masterToggleNames = {
-			"AutoFarmBoulders",
-			"AutoFarmMoney",
-			"AutoPickup",
-			"InstantPrompt",
-			"AutoRunePickup",
-			"SpeedBoost",
-			"Noclip",
-			"InfJump",
-			"Fly",
-			"AutoRejoinBoulders",
-			"FocusLuckCrystals",
-			"AutoPlantLuckCrystals",
-			"MoneyAutoSell",
-			"AutoBuyBombs",
-		}
-
-		local function toggleValue(name)
-			local entry = Library and Library.Toggles and Library.Toggles[name]
-			if not entry then
-				return false
-			end
-			local ok, value = pcall(function()
-				return entry.Value
-			end)
-			return ok and value == true
-		end
-
-		local function setToggle(name, value)
-			local entry = Library and Library.Toggles and Library.Toggles[name]
-			if entry and entry.SetValue then
-				pcall(function()
-					entry:SetValue(value)
-				end)
-			end
-		end
-
-		local function pauseAllWork()
-			if masterPaused then
-				return
-			end
-
-			masterPaused = true
-			table.clear(savedToggleStates)
-
-			-- Save the exact state of every automation toggle.
-			for _, name in ipairs(masterToggleNames) do
-				savedToggleStates[name] = toggleValue(name)
-			end
-
-			-- Turn off only toggles that were actually running.
-			for name, wasOn in pairs(savedToggleStates) do
-				if wasOn then
-					setToggle(name, false)
-				end
-			end
-
-			-- Stop any current movement/teleport immediately.
-			pcall(finishTeleport)
-			pcall(setSpeedBoost, false)
-
-			Library:Notify("หยุดการทำงานทั้งหมดแล้ว", 2)
-		end
-
-		local function resumeAllWork()
-			if not masterPaused then
-				return
-			end
-
-			masterPaused = false
-
-			-- Restore exactly what was enabled before pressing Pause.
-			for name, wasOn in pairs(savedToggleStates) do
-				if wasOn then
-					setToggle(name, true)
-				end
-			end
-
-			table.clear(savedToggleStates)
-			Library:Notify("กลับมาทำงานตามปกติแล้ว", 2)
-		end
-
-		MasterControlGroup:AddToggle("MasterPause", {
-			Text = "หยุดการทำงานทั้งหมด",
-			Default = false,
-			Callback = function(value)
-				if value then
-					pauseAllWork()
-				else
-					resumeAllWork()
-				end
-
-			end,
-		})
-
-		MasterControlGroup:AddLabel("เปิด = หยุดทั้งหมด | ปิด = ทำงานต่อ", true)
-
-		getgenv().UniverseMasterPauseSet = function(value)
-			if value then
-				pauseAllWork()
-			else
-				resumeAllWork()
-			end
-		end
-
 		local MenuGroup = SettingsTab:AddRightGroupbox("Menu", "wrench")
 
 		MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
@@ -6342,60 +6231,3 @@ Library:OnUnload(cleanupAll)
 
 -- Expose the existing cleanup routine to the mobile Stop All button.
 State.stopAllAutomation = cleanupAll
-
-
--- Main-screen Master Pause button
-task.spawn(function()
-	local Players = game:GetService("Players")
-	local player = Players.LocalPlayer
-	local pg = player:WaitForChild("PlayerGui")
-
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "UniverseMasterPauseScreen"
-	gui.ResetOnSpawn = false
-	gui.IgnoreGuiInset = true
-	gui.DisplayOrder = 1000000
-	gui.Parent = pg
-
-	local button = Instance.new("TextButton")
-	button.Name = "MasterPauseButton"
-	button.Size = UDim2.fromOffset(150, 44)
-	button.Position = UDim2.new(0, 14, 0.5, -22)
-	button.BackgroundTransparency = 0.08
-	button.Text = "▶ ทำงานปกติ"
-	button.TextSize = 16
-	button.TextColor3 = Color3.new(1, 1, 1)
-	button.AutoButtonColor = true
-	button.Parent = gui
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
-	corner.Parent = button
-
-	local stroke = Instance.new("UIStroke")
-	stroke.Thickness = 1.5
-	stroke.Parent = button
-
-	local paused = false
-
-	local function update()
-		if paused then
-			button.Text = "■ หยุดการทำงาน"
-		else
-			button.Text = "▶ ทำงานปกติ"
-		end
-	end
-
-	button.Activated:Connect(function()
-		paused = not paused
-		update()
-
-		local fn = getgenv().UniverseMasterPauseSet
-		if fn then
-			pcall(fn, paused)
-		end
-	end)
-
-	update()
-end)
-
