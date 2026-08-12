@@ -12,7 +12,7 @@ local Config = {
 	MountainCenter = Vector3.new(42.67, 1066.7, 102.2),
 	MountainRadius = 862.7,
 	RemotesFolder = "Remotes",
-	KeybindMenu = "RightControl",
+	KeybindMenu = "F1",
 	KeybindAimTp = "F",
 }
 
@@ -304,7 +304,7 @@ Library.ShowToggleFrameInKeybinds = true
 local Window = Library:CreateWindow({
 	Title = "Mine a Mountain",
 	Footer = "Mine a Mountain | Made by DonnieAzoff",
-	AutoShow = true,
+	AutoShow = false,
 	NotifySide = "Right",
 	ShowCustomCursor = false,
 })
@@ -575,7 +575,7 @@ local function meetsFilter(inst, value)
 	local v = value or crystalValue(inst)
 	local luck = crystalLuck(inst)
 
-	-- Priority pickup: Luck 400+ OR value 1T+, regardless of the other stat.
+	-- Priority pickup: Luck 600+ OR value 1T+, regardless of the other stat.
 	return luck >= 4.0 or v >= 1000000000000
 end
 
@@ -3230,6 +3230,16 @@ do
 
 
 		TopBox:AddDivider()
+		TopBox:AddButton("Stop Auto Boulder", function()
+			if State.stopBoulderFarm then
+				State.stopBoulderFarm()
+				Library:Notify("Auto Boulder stopped", 2)
+			else
+				Library:Notify("Auto Boulder is not running", 2)
+			end
+		end)
+
+		TopBox:AddDivider()
 		TopBox:AddButton("TP Home", function()
 			if State.stopBoulderFarm then
 				State.stopBoulderFarm()
@@ -3657,9 +3667,9 @@ do
 		local CRYSTAL_SCAN_INTERVAL = 3.0
 
 		-- Fallback: when none of the selected boulders can be found,
-		-- collect the highest-Luck crystal with Luck >= 400 first.
+		-- collect the highest-Luck crystal with Luck >= 600 first.
 		local FALLBACK_MIN_VALUE = 1e6
-		local FALLBACK_LUCK_POINTS = 400
+		local FALLBACK_LUCK_POINTS = 600
 		local FALLBACK_ULTRA_VALUE = 1e12
 		local LUCK_SCAN_RANGE = 1000
 		local LUCK_GRAB_TIMEOUT = 45.0
@@ -3678,6 +3688,27 @@ do
 		local active = false
 		local firstRunDelay = true
 		local firstRunDelayUntil = 0
+
+		-- Persist the Boulder Start Delay between script runs.
+		local START_DELAY_FILE = "Universe_StartDelay.txt"
+		local startDelay = 15
+		pcall(function()
+			if isfile and readfile and isfile(START_DELAY_FILE) then
+				local saved = tonumber(readfile(START_DELAY_FILE))
+				if saved then
+					startDelay = math.clamp(saved, 0, 60)
+				end
+			end
+		end)
+
+		local function saveStartDelay(value)
+			startDelay = math.clamp(tonumber(value) or 15, 0, 60)
+			pcall(function()
+				if writefile then
+					writefile(START_DELAY_FILE, tostring(startDelay))
+				end
+			end)
+		end
 		-- Default to farming every configured boulder type.
 		local autoRejoin = Config.AutoRejoinBoulders
 		local targets = {}
@@ -4546,7 +4577,7 @@ do
 					end
 
 					beginLoot(true)
-					statusText = "No boulder / no qualifying mineral (Luck 400+ or 1T+)"
+					statusText = "No boulder / no qualifying mineral (Luck 600+ or 1T+)"
 					return
 				end
 
@@ -4896,8 +4927,8 @@ do
 			active = true
 			if firstRunDelay then
 				firstRunDelay = false
-				firstRunDelayUntil = os.clock() + 10
-				statusText = "Starting Boulder Farm in 15s"
+				firstRunDelayUntil = os.clock() + startDelay
+				statusText = string.format("Starting Boulder Farm in %.0fs", startDelay)
 			end
 			phase = "scan"
 			waitUntil = 0
@@ -4955,6 +4986,19 @@ do
 			Text = "Auto Farm",
 			Default = true,
 			Callback = setActive,
+		})
+
+		FarmBox:AddSlider("BoulderStartDelay", {
+			Text = "Start Delay",
+			Default = startDelay,
+			Min = 0,
+			Max = 60,
+			Rounding = 1,
+			Compact = false,
+			Suffix = "s",
+			Callback = function(value)
+				saveStartDelay(value)
+			end,
 		})
 
 		-- Start the boulder farm immediately after the GUI control is created.
@@ -6228,3 +6272,6 @@ end
 
 getgenv().UniverseUnload = cleanupAll
 Library:OnUnload(cleanupAll)
+
+-- Expose the existing cleanup routine to the mobile Stop All button.
+State.stopAllAutomation = cleanupAll
