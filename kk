@@ -4988,6 +4988,12 @@ do
 			Callback = setActive,
 		})
 
+		FarmBox:AddToggle("BoulderESP", {
+			Text = "Boulder ESP",
+			Default = false,
+			Callback = Mountain.setBoulderEsp,
+		})
+
 		FarmBox:AddSlider("BoulderStartDelay", {
 			Text = "Start Delay",
 			Default = startDelay,
