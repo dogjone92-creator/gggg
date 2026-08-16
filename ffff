@@ -576,7 +576,7 @@ local function meetsFilter(inst, value)
 	local luck = crystalLuck(inst)
 
 	-- Priority pickup: Luck 600+ OR value 1T+, regardless of the other stat.
-	return luck >= 4.0 or v >= 1000000000000
+	return luck >= 6.0 or v >= 1000000000000
 end
 
 local function ownsGamepass(name)
@@ -676,17 +676,26 @@ end
 local crystalFlags = setmetatable({}, { __mode = "k" })
 
 local function isCrystal(inst)
-	local cached = crystalFlags[inst]
-	if cached ~= nil then
-		return cached
+	-- Do not permanently cache a false result. Newly spawned crystals can
+	-- receive their Attributes a few frames after the BasePart is created.
+	-- Caching false here caused those crystals to become invisible to every
+	-- later scan. Only cache a confirmed crystal.
+	if crystalFlags[inst] == true then
+		return true
 	end
 
-	local result = false
-	if inst:IsA("BasePart") and getAttr(inst, "Value") ~= nil then
-		result = getAttr(inst, "CrystalName") ~= nil or inst.Name:find("Crystal", 1, true) ~= nil
+	if not inst or not inst:IsA("BasePart") then
+		return false
 	end
 
-	crystalFlags[inst] = result
+	local value = getAttr(inst, "Value")
+	local crystalName = getAttr(inst, "CrystalName")
+	local result = value ~= nil and (crystalName ~= nil or inst.Name:find("Crystal", 1, true) ~= nil)
+
+	if result then
+		crystalFlags[inst] = true
+	end
+
 	return result
 end
 
@@ -1866,8 +1875,33 @@ local function pickupStep(filterFunc)
 
 	local candidatesList = pickupCandidates(free, root.Position, filterFunc)
 	if #candidatesList == 0 then
-		requestStream(root.Position)
-		return
+		-- Newly spawned crystals may not yet be registered in Storage. Do one
+		-- full-map fallback scan before declaring that nothing was found.
+		local deepSeen = {}
+		for _, inst in ipairs(Services.Workspace:GetDescendants()) do
+			if inst:IsA("BasePart") and not deepSeen[inst] then
+				deepSeen[inst] = true
+				if inst.Parent and isCrystal(inst) and getAttr(inst, "Collected") ~= true then
+					local value = crystalValue(inst)
+					local weight = crystalWeight(inst)
+					local distance = surfaceDistance(inst, root.Position)
+					if (not filterFunc or filterFunc(inst)) and meetsFilter(inst, value) and weight <= free and distance <= PICK.range then
+						candidatesList[#candidatesList + 1] = {
+							inst = inst,
+							prompt = crystalPrompt(inst),
+							value = value,
+							weight = weight,
+							distance = distance,
+						}
+					end
+				end
+				end
+			end
+		end
+		if #candidatesList == 0 then
+			requestStream(root.Position)
+			return
+		end
 	end
 
 	local budget = free
@@ -1879,10 +1913,16 @@ local function pickupStep(filterFunc)
 		end
 
 		if entry.weight <= budget then
-			Storage.claimed[entry.inst] = now
-			if grabCrystal(entry.inst, entry.prompt) then
+			-- Only mark a crystal as claimed after the pickup request was actually
+			-- sent. Previously a failed request was still marked claimed, which
+			-- made the next scan skip the crystal for PICK.retry seconds.
+			local ok = grabCrystal(entry.inst, entry.prompt)
+			if ok then
+				Storage.claimed[entry.inst] = now
 				budget -= entry.weight
 				grabs += 1
+			else
+				Storage.claimed[entry.inst] = nil
 			end
 		end
 	end
@@ -4322,8 +4362,9 @@ do
 
 				local luckPoints = math.floor(crystalLuck(inst) * 100 + 0.5)
 				local value = tonumber(crystalValue(inst)) or 0
-				local qualifies = (value >= FALLBACK_MIN_VALUE and luckPoints >= FALLBACK_LUCK_POINTS) or (value >= FALLBACK_ULTRA_VALUE)
-				if not qualifies then
+				-- Use the same pickup filter everywhere: Luck 600+ OR Value 1T+.
+				-- This avoids the fallback having a different/stricter rule.
+				if not meetsFilter(inst, value) then
 					return
 				end
 
@@ -4332,6 +4373,7 @@ do
 					return
 				end
 
+				local distance = (inst.Position - origin).Magnitude
 				local score = value >= FALLBACK_ULTRA_VALUE and (1e18 + value) or (luckPoints * 1e12 + value)
 				if not best or score > bestLuck or (score == bestLuck and distance < bestDistance) then
 					best = inst
@@ -4812,10 +4854,10 @@ do
 					target = nil
 					anchor = nil
 					postBoulderLoot = nil
-					postBoulderSearchUntil = now + 3.0
+					postBoulderSearchUntil = now + 20.0
 					postBoulderGrabClock = 0
 					phase = "post_boulder_loot"
-					statusText = "Searching crystals 3.0s"
+					statusText = "Searching crystals 20.0s"
 				end
 
 				return
@@ -4825,7 +4867,7 @@ do
 				if postBoulderLoot then
 					if not postBoulderLoot.Parent or getAttr(postBoulderLoot, "Collected") == true then
 						postBoulderLoot = nil
-						postBoulderSearchUntil = now + 3.0
+						postBoulderSearchUntil = now + 20.0
 						postBoulderGrabClock = 0
 					else
 						local spot = postBoulderLoot.Position
@@ -5168,7 +5210,7 @@ do
 		local active = false
 		local autoSell = false
 		local focusLuck = false
-		local minLuckPoints = 4
+		local minLuckPoints = 600
 		local autoPlantLuck = false
 		local plantClock = 0
 		local heldPick
@@ -5450,17 +5492,13 @@ do
 				end
 
 				local score = 0
+				local value = crystalValue(inst)
+				if not meetsFilter(inst, value) then
+					return
+				end
 				if focusLuck then
-					local luckPts = math.floor(crystalLuck(inst) * 100 + 0.5)
-					if luckPts < minLuckPoints then
-						return
-					end
-					score = luckPts
+					score = math.floor(crystalLuck(inst) * 100 + 0.5)
 				else
-					local value = crystalValue(inst)
-					if not meetsFilter(inst, value) then
-						return
-					end
 					score = value
 				end
 
@@ -5708,14 +5746,9 @@ do
 				return
 			end
 
-			if focusLuck then
-				pickupStep(function(inst)
-					local luckPts = math.floor(crystalLuck(inst) * 100 + 0.5)
-					return luckPts >= minLuckPoints
-				end)
-			else
-				pickupStep()
-			end
+			pickupStep(function(inst)
+				return meetsFilter(inst, crystalValue(inst))
+			end)
 
 			if heldPick == nil or heldPick.Parent ~= LocalPlayer.Character then
 				equipClock = 0
