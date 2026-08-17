@@ -5910,19 +5910,13 @@ do
 
 					columnSwings = 0
 					columnY = spot.Y
-					if peakY then
-						local baseY = zoneBase()
-						local peak = zonePeak()
-						local mountainHeight = math.max(0, peak - baseY)
-						local minMiningY = peak - (mountainHeight * MINING_DEPTH_RATIO)
-						if spot.Y < minMiningY then
-							blacklistedColumns[gridKey(target.X, target.Z)] = now + 20
-							target = nil
-							columnY = nil
-							columnDry = 0
-							columnSwings = 0
-							return
-						end
+					if peakY and spot.Y < (peakY - (600 * MINING_DEPTH_RATIO)) then
+						blacklistedColumns[gridKey(target.X, target.Z)] = now + 20
+						target = nil
+						columnY = nil
+						columnDry = 0
+						columnSwings = 0
+						return
 					end
 					target = spot
 
@@ -5952,8 +5946,7 @@ do
 				end
 
 				target = spot
-				-- Use the mountain's actual peak as the reference, not the first target's Y.
-				peakY = zonePeak()
+				peakY = spot.Y
 				columnY = spot.Y
 				columnDry = 0
 				columnSwings = 0
