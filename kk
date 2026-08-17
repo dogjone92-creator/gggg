@@ -12,7 +12,7 @@ local Config = {
 	MountainCenter = Vector3.new(42.67, 1066.7, 102.2),
 	MountainRadius = 862.7,
 	RemotesFolder = "Remotes",
-	KeybindMenu = "RightControl",
+	KeybindMenu = "F1",
 	KeybindAimTp = "F",
 }
 
@@ -575,8 +575,8 @@ local function meetsFilter(inst, value)
 	local v = value or crystalValue(inst)
 	local luck = crystalLuck(inst)
 
-	-- Priority pickup: Luck 400+ OR value 1T+, regardless of the other stat.
-	return luck >= 4.0 or v >= 1000000000000
+	-- Priority pickup: Luck 600+ OR value 1T+, regardless of the other stat.
+	return luck >= 6.0 or v >= 1000000000000
 end
 
 local function ownsGamepass(name)
@@ -676,17 +676,26 @@ end
 local crystalFlags = setmetatable({}, { __mode = "k" })
 
 local function isCrystal(inst)
-	local cached = crystalFlags[inst]
-	if cached ~= nil then
-		return cached
+	-- Do not permanently cache a false result. Newly spawned crystals can
+	-- receive their Attributes a few frames after the BasePart is created.
+	-- Caching false here caused those crystals to become invisible to every
+	-- later scan. Only cache a confirmed crystal.
+	if crystalFlags[inst] == true then
+		return true
 	end
 
-	local result = false
-	if inst:IsA("BasePart") and getAttr(inst, "Value") ~= nil then
-		result = getAttr(inst, "CrystalName") ~= nil or inst.Name:find("Crystal", 1, true) ~= nil
+	if not inst or not inst:IsA("BasePart") then
+		return false
 	end
 
-	crystalFlags[inst] = result
+	local value = getAttr(inst, "Value")
+	local crystalName = getAttr(inst, "CrystalName")
+	local result = value ~= nil and (crystalName ~= nil or inst.Name:find("Crystal", 1, true) ~= nil)
+
+	if result then
+		crystalFlags[inst] = true
+	end
+
 	return result
 end
 
@@ -1866,8 +1875,33 @@ local function pickupStep(filterFunc)
 
 	local candidatesList = pickupCandidates(free, root.Position, filterFunc)
 	if #candidatesList == 0 then
-		requestStream(root.Position)
-		return
+		-- Newly spawned crystals may not yet be registered in Storage. Do one
+		-- full-map fallback scan before declaring that nothing was found.
+		local deepSeen = {}
+		for _, inst in ipairs(Services.Workspace:GetDescendants()) do
+			if inst:IsA("BasePart") and not deepSeen[inst] then
+				deepSeen[inst] = true
+				if inst.Parent and isCrystal(inst) and getAttr(inst, "Collected") ~= true then
+					local value = crystalValue(inst)
+					local weight = crystalWeight(inst)
+					local distance = surfaceDistance(inst, root.Position)
+					if (not filterFunc or filterFunc(inst)) and meetsFilter(inst, value) and weight <= free and distance <= PICK.range then
+						candidatesList[#candidatesList + 1] = {
+							inst = inst,
+							prompt = crystalPrompt(inst),
+							value = value,
+							weight = weight,
+							distance = distance,
+						}
+					end
+				end
+				end
+			end
+		end
+		if #candidatesList == 0 then
+			requestStream(root.Position)
+			return
+		end
 	end
 
 	local budget = free
@@ -1879,10 +1913,16 @@ local function pickupStep(filterFunc)
 		end
 
 		if entry.weight <= budget then
-			Storage.claimed[entry.inst] = now
-			if grabCrystal(entry.inst, entry.prompt) then
+			-- Only mark a crystal as claimed after the pickup request was actually
+			-- sent. Previously a failed request was still marked claimed, which
+			-- made the next scan skip the crystal for PICK.retry seconds.
+			local ok = grabCrystal(entry.inst, entry.prompt)
+			if ok then
+				Storage.claimed[entry.inst] = now
 				budget -= entry.weight
 				grabs += 1
+			else
+				Storage.claimed[entry.inst] = nil
 			end
 		end
 	end
@@ -3230,6 +3270,16 @@ do
 
 
 		TopBox:AddDivider()
+		TopBox:AddButton("Stop Auto Boulder", function()
+			if State.stopBoulderFarm then
+				State.stopBoulderFarm()
+				Library:Notify("Auto Boulder stopped", 2)
+			else
+				Library:Notify("Auto Boulder is not running", 2)
+			end
+		end)
+
+		TopBox:AddDivider()
 		TopBox:AddButton("TP Home", function()
 			if State.stopBoulderFarm then
 				State.stopBoulderFarm()
@@ -3657,9 +3707,9 @@ do
 		local CRYSTAL_SCAN_INTERVAL = 3.0
 
 		-- Fallback: when none of the selected boulders can be found,
-		-- collect the highest-Luck crystal with Luck >= 400 first.
+		-- collect the highest-Luck crystal with Luck >= 600 first.
 		local FALLBACK_MIN_VALUE = 1e6
-		local FALLBACK_LUCK_POINTS = 400
+		local FALLBACK_LUCK_POINTS = 600
 		local FALLBACK_ULTRA_VALUE = 1e12
 		local LUCK_SCAN_RANGE = 1000
 		local LUCK_GRAB_TIMEOUT = 45.0
@@ -3678,6 +3728,27 @@ do
 		local active = false
 		local firstRunDelay = true
 		local firstRunDelayUntil = 0
+
+		-- Persist the Boulder Start Delay between script runs.
+		local START_DELAY_FILE = "Universe_StartDelay.txt"
+		local startDelay = 15
+		pcall(function()
+			if isfile and readfile and isfile(START_DELAY_FILE) then
+				local saved = tonumber(readfile(START_DELAY_FILE))
+				if saved then
+					startDelay = math.clamp(saved, 0, 60)
+				end
+			end
+		end)
+
+		local function saveStartDelay(value)
+			startDelay = math.clamp(tonumber(value) or 15, 0, 60)
+			pcall(function()
+				if writefile then
+					writefile(START_DELAY_FILE, tostring(startDelay))
+				end
+			end)
+		end
 		-- Default to farming every configured boulder type.
 		local autoRejoin = Config.AutoRejoinBoulders
 		local targets = {}
@@ -4291,8 +4362,9 @@ do
 
 				local luckPoints = math.floor(crystalLuck(inst) * 100 + 0.5)
 				local value = tonumber(crystalValue(inst)) or 0
-				local qualifies = (value >= FALLBACK_MIN_VALUE and luckPoints >= FALLBACK_LUCK_POINTS) or (value >= FALLBACK_ULTRA_VALUE)
-				if not qualifies then
+				-- Use the same pickup filter everywhere: Luck 600+ OR Value 1T+.
+				-- This avoids the fallback having a different/stricter rule.
+				if not meetsFilter(inst, value) then
 					return
 				end
 
@@ -4301,6 +4373,7 @@ do
 					return
 				end
 
+				local distance = (inst.Position - origin).Magnitude
 				local score = value >= FALLBACK_ULTRA_VALUE and (1e18 + value) or (luckPoints * 1e12 + value)
 				if not best or score > bestLuck or (score == bestLuck and distance < bestDistance) then
 					best = inst
@@ -4546,7 +4619,7 @@ do
 					end
 
 					beginLoot(true)
-					statusText = "No boulder / no qualifying mineral (Luck 400+ or 1T+)"
+					statusText = "No boulder / no qualifying mineral (Luck 600+ or 1T+)"
 					return
 				end
 
@@ -4781,10 +4854,10 @@ do
 					target = nil
 					anchor = nil
 					postBoulderLoot = nil
-					postBoulderSearchUntil = now + 3.0
+					postBoulderSearchUntil = now + 20.0
 					postBoulderGrabClock = 0
 					phase = "post_boulder_loot"
-					statusText = "Searching crystals 3.0s"
+					statusText = "Searching crystals 20.0s"
 				end
 
 				return
@@ -4794,7 +4867,7 @@ do
 				if postBoulderLoot then
 					if not postBoulderLoot.Parent or getAttr(postBoulderLoot, "Collected") == true then
 						postBoulderLoot = nil
-						postBoulderSearchUntil = now + 3.0
+						postBoulderSearchUntil = now + 20.0
 						postBoulderGrabClock = 0
 					else
 						local spot = postBoulderLoot.Position
@@ -4896,8 +4969,8 @@ do
 			active = true
 			if firstRunDelay then
 				firstRunDelay = false
-				firstRunDelayUntil = os.clock() + 10
-				statusText = "Starting Boulder Farm in 15s"
+				firstRunDelayUntil = os.clock() + startDelay
+				statusText = string.format("Starting Boulder Farm in %.0fs", startDelay)
 			end
 			phase = "scan"
 			waitUntil = 0
@@ -4955,6 +5028,19 @@ do
 			Text = "Auto Farm",
 			Default = true,
 			Callback = setActive,
+		})
+
+		FarmBox:AddSlider("BoulderStartDelay", {
+			Text = "Start Delay",
+			Default = startDelay,
+			Min = 0,
+			Max = 60,
+			Rounding = 1,
+			Compact = false,
+			Suffix = "s",
+			Callback = function(value)
+				saveStartDelay(value)
+			end,
 		})
 
 		-- Start the boulder farm immediately after the GUI control is created.
@@ -5124,7 +5210,7 @@ do
 		local active = false
 		local autoSell = false
 		local focusLuck = false
-		local minLuckPoints = 4
+		local minLuckPoints = 600
 		local autoPlantLuck = false
 		local plantClock = 0
 		local heldPick
@@ -5406,17 +5492,13 @@ do
 				end
 
 				local score = 0
+				local value = crystalValue(inst)
+				if not meetsFilter(inst, value) then
+					return
+				end
 				if focusLuck then
-					local luckPts = math.floor(crystalLuck(inst) * 100 + 0.5)
-					if luckPts < minLuckPoints then
-						return
-					end
-					score = luckPts
+					score = math.floor(crystalLuck(inst) * 100 + 0.5)
 				else
-					local value = crystalValue(inst)
-					if not meetsFilter(inst, value) then
-						return
-					end
 					score = value
 				end
 
@@ -5664,14 +5746,9 @@ do
 				return
 			end
 
-			if focusLuck then
-				pickupStep(function(inst)
-					local luckPts = math.floor(crystalLuck(inst) * 100 + 0.5)
-					return luckPts >= minLuckPoints
-				end)
-			else
-				pickupStep()
-			end
+			pickupStep(function(inst)
+				return meetsFilter(inst, crystalValue(inst))
+			end)
 
 			if heldPick == nil or heldPick.Parent ~= LocalPlayer.Character then
 				equipClock = 0
@@ -6231,215 +6308,3 @@ Library:OnUnload(cleanupAll)
 
 -- Expose the existing cleanup routine to the mobile Stop All button.
 State.stopAllAutomation = cleanupAll
-
--- Mobile / PC Floating UI Toggle
--- Starts hidden. Tap/click the floating button to show/hide the complete UI.
-task.spawn(function()
-    local Players = game:GetService("Players")
-    local UserInputService = game:GetService("UserInputService")
-    local player = Players.LocalPlayer
-
-    local visible = false
-    local buttonGui
-    local toggleButton
-
-    local function isScriptGui(gui)
-        if not gui or not gui:IsA("ScreenGui") then return false end
-        if gui == buttonGui or gui.Name == "MobileFloatingToggle" then return false end
-
-        local foundTitle = false
-        pcall(function()
-            for _, d in ipairs(gui:GetDescendants()) do
-                if d:IsA("TextLabel") or d:IsA("TextButton") then
-                    local t = string.lower(tostring(d.Text or ""))
-                    if string.find(t, "mine a mountain", 1, true) then
-                        foundTitle = true
-                        break
-                    end
-                end
-            end
-        end)
-        if foundTitle then return true end
-
-        local n = string.lower(gui.Name)
-        local hints = {"boulder","mineral","farm","rune","luck","universe","firstfile","tp","home","script","linoria"}
-        for _, hint in ipairs(hints) do
-            if string.find(n, hint, 1, true) then return true end
-        end
-        return false
-    end
-
-    local function setMainUI(state)
-        visible = state
-
-        local containers = {}
-        local pg = player:FindFirstChildOfClass("PlayerGui")
-        if pg then table.insert(containers, pg) end
-        local cg = game:GetService("CoreGui")
-        if cg then table.insert(containers, cg) end
-
-        for _, container in ipairs(containers) do
-            for _, gui in ipairs(container:GetChildren()) do
-                if isScriptGui(gui) then
-                    pcall(function() gui.Enabled = state end)
-                end
-            end
-        end
-
-        if toggleButton then
-            toggleButton.Text = state and "✕" or "☰"
-        end
-    end
-
-    local function createFloatingButton()
-        local pg = player:WaitForChild("PlayerGui")
-
-        buttonGui = Instance.new("ScreenGui")
-        buttonGui.Name = "MobileFloatingToggle"
-        buttonGui.ResetOnSpawn = false
-        buttonGui.IgnoreGuiInset = true
-        buttonGui.DisplayOrder = 999999
-        buttonGui.Parent = pg
-
-        toggleButton = Instance.new("TextButton")
-        toggleButton.Name = "ToggleButton"
-        toggleButton.Size = UDim2.fromOffset(52, 52)
-        toggleButton.Position = UDim2.new(1, -72, 0.5, -26)
-        toggleButton.AnchorPoint = Vector2.new(0, 0)
-        toggleButton.BackgroundTransparency = 0.15
-        toggleButton.Text = "☰"
-        toggleButton.TextSize = 25
-        toggleButton.TextColor3 = Color3.new(1, 1, 1)
-        toggleButton.AutoButtonColor = true
-        toggleButton.Parent = buttonGui
-
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(1, 0)
-        corner.Parent = toggleButton
-
-        local stroke = Instance.new("UIStroke")
-        stroke.Thickness = 2
-        stroke.Parent = toggleButton
-
-        -- Separate Stop All button.
-        local stopButton = Instance.new("TextButton")
-        stopButton.Name = "StopAllButton"
-        stopButton.Size = UDim2.fromOffset(52, 52)
-        stopButton.Position = UDim2.new(1, -136, 0.5, -26)
-        stopButton.BackgroundTransparency = 0.15
-        stopButton.Text = "■"
-        stopButton.TextSize = 24
-        stopButton.TextColor3 = Color3.new(1, 1, 1)
-        stopButton.AutoButtonColor = true
-        stopButton.Parent = buttonGui
-
-        local stopCorner = Instance.new("UICorner")
-        stopCorner.CornerRadius = UDim.new(1, 0)
-        stopCorner.Parent = stopButton
-
-        local stopStroke = Instance.new("UIStroke")
-        stopStroke.Thickness = 2
-        stopStroke.Parent = stopButton
-
-        stopButton.Activated:Connect(function()
-            -- Use the script's existing shutdown functions.
-            if State.stopBoulderFarm then
-                pcall(State.stopBoulderFarm)
-            end
-            if State.stopAllAutomation then
-                pcall(State.stopAllAutomation)
-            end
-
-            -- Disable the common automation toggles as well.
-            State.afkRunning = false
-            State.espActive = false
-            State.playerEspActive = false
-            State.aimTpEnabled = false
-            State.speedActive = false
-            State.autoPickupActive = false
-            State.instantPromptActive = false
-            State.autoBuyBombs = false
-
-            stopButton.Text = "✓"
-            task.delay(1, function()
-                if stopButton and stopButton.Parent then
-                    stopButton.Text = "■"
-                end
-            end)
-        end)
-
-        -- Drag/touch support so the buttons can be moved anywhere on screen.
-        local dragging = false
-        local dragStart
-        local startPos
-        local moved = false
-
-        local function update(input)
-            local delta = input.Position - dragStart
-            if delta.Magnitude > 6 then
-                moved = true
-            end
-
-            toggleButton.Position = UDim2.new(
-                startPos.X.Scale,
-                startPos.X.Offset + delta.X,
-                startPos.Y.Scale,
-                startPos.Y.Offset + delta.Y
-            )
-        end
-
-        toggleButton.Activated:Connect(function()
-            if not moved then
-                setMainUI(not visible)
-            end
-        end)
-
-        toggleButton.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.Touch
-                or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = true
-                moved = false
-                dragStart = input.Position
-                startPos = toggleButton.Position
-
-                input.Changed:Connect(function()
-                    if input.UserInputState == Enum.UserInputState.End then
-                        dragging = false
-                    end
-                end)
-            end
-        end)
-
-        UserInputService.InputChanged:Connect(function(input)
-            if dragging and (
-                input.UserInputType == Enum.UserInputType.Touch
-                or input.UserInputType == Enum.UserInputType.MouseMovement
-            ) then
-                update(input)
-            end
-        end)
-    end
-
-    createFloatingButton()
-
-    -- Start with all main UI hidden.
-    task.wait(0.25)
-    setMainUI(false)
-
-    -- Hide newly-created script UI while the menu is closed.
-    local pg = player:WaitForChild("PlayerGui")
-    local cg = game:GetService("CoreGui")
-
-    local function watchContainer(container)
-        container.ChildAdded:Connect(function(gui)
-            if not visible and isScriptGui(gui) then
-                task.defer(function()
-                    pcall(function() gui.Enabled = false end)
-                end)
-            end
-        end)
-    end
-
-    watchContainer(pg)
-    watchContainer(cg)
-end)
