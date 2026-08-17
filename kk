@@ -3713,8 +3713,6 @@ do
 		local FALLBACK_ULTRA_VALUE = 1e12
 		local LUCK_SCAN_RANGE = 1000
 		local LUCK_GRAB_TIMEOUT = 45.0
-		local POST_BOULDER_GRAB_TIMEOUT = 120.0
-		local AUTO_REJOIN_FARM_TIME = 420.0 -- 7 minutes
 
 		local PICK_NAMES = {
 			["Rusty Scrapper"] = true, ["Weathered Wood"] = true, ["Chipped Stone"] = true,
@@ -3760,8 +3758,6 @@ do
 		local postBoulderSearchUntil = 0
 		local postBoulderLoot = nil
 		local postBoulderGrabClock = 0
-		local postBoulderGrabStarted = 0
-		local autoRejoinFarmStarted = 0
 		local phase = "idle"
 		local target, anchor
 		local luckTarget
@@ -4505,7 +4501,6 @@ do
 
 		local function stop()
 			active = false
-			autoRejoinFarmStarted = 0
 			phase = "idle"
 			target = nil
 			anchor = nil
@@ -4649,9 +4644,17 @@ do
 			end
 
 			if phase == "luck" then
-				-- Once a qualifying mineral is found, mineral collection has priority.
-				-- Do NOT switch back to Boulder mining until this mineral is collected
-				-- or the 120-second collection timeout is reached.
+				-- A selected boulder always has priority. If one appears while travelling
+				-- to a high-Luck crystal, immediately abandon the fallback and mine it.
+				local boulderModel = pickTarget()
+				if boulderModel then
+					target = boulderModel
+					anchor = visibleAnchor(boulderModel) or anchorOf(boulderModel)
+					luckTarget = nil
+					phase = "mine"
+					statusText = "Boulder found - returning to mine"
+					return
+				end
 
 				if not luckTarget or not luckTarget.Parent or getAttr(luckTarget, "Collected") == true then
 					luckTarget = nil
@@ -4687,22 +4690,6 @@ do
 			end
 
 			if phase == "mine" then
-				-- Scan the ENTIRE map for qualifying minerals every 3 seconds while
-				-- mining. If one is found, immediately stop mining the Boulder and
-				-- switch to mineral collection.
-				if now >= crystalScanClock then
-					crystalScanClock = now + CRYSTAL_SCAN_INTERVAL
-					luckTarget, _ = findHighLuckCrystal(root.Position)
-					if luckTarget then
-						target = nil
-						anchor = nil
-						luckTargetStarted = now
-						phase = "luck"
-						statusText = string.format("Mineral found - stopping Boulder / Luck %.0f", crystalLuck(luckTarget) * 100)
-						return
-					end
-				end
-
 				if not target or not target.Parent then
 					lastSpot = root.CFrame
 					beginLoot(false)
@@ -4869,7 +4856,6 @@ do
 					postBoulderLoot = nil
 					postBoulderSearchUntil = now + 20.0
 					postBoulderGrabClock = 0
-					postBoulderGrabStarted = 0
 					phase = "post_boulder_loot"
 					statusText = "Searching crystals 20.0s"
 				end
@@ -4883,20 +4869,7 @@ do
 						postBoulderLoot = nil
 						postBoulderSearchUntil = now + 20.0
 						postBoulderGrabClock = 0
-						postBoulderGrabStarted = 0
 					else
-						-- If a qualifying mineral remains uncollected for 60 seconds,
-						-- treat it as a failed pickup and auto rejoin the server.
-						if postBoulderGrabStarted <= 0 then
-							postBoulderGrabStarted = now
-						end
-						if now - postBoulderGrabStarted >= POST_BOULDER_GRAB_TIMEOUT then
-							statusText = "Mineral pickup timed out - auto rejoining"
-							Library:Notify("Unable to collect mineral within 2 minutes - rejoining", 4)
-							stop()
-							restart()
-							return
-						end
 						local spot = postBoulderLoot.Position
 						-- Keep the mineral locked as the active target and retry
 						-- until the game confirms that it was actually collected.
@@ -4924,9 +4897,7 @@ do
 				if now < postBoulderSearchUntil then
 					postBoulderLoot = findPostBoulderCrystal(root.Position)
 					if postBoulderLoot then
-						postBoulderGrabStarted = now
-						postBoulderGrabClock = 0
-						statusText = string.format("Found %s (%s) - collecting (120s timeout)", crystalName(postBoulderLoot), formatShort(crystalValue(postBoulderLoot), "$"))
+						statusText = string.format("Found %s (%s) - collecting", crystalName(postBoulderLoot), formatShort(crystalValue(postBoulderLoot), "$"))
 						return
 					end
 					statusText = string.format("Searching crystals %.1fs", math.max(0, postBoulderSearchUntil - now))
@@ -4996,7 +4967,6 @@ do
 			end
 
 			active = true
-			autoRejoinFarmStarted = os.clock()
 			if firstRunDelay then
 				firstRunDelay = false
 				firstRunDelayUntil = os.clock() + startDelay
@@ -5035,7 +5005,6 @@ do
 			postBoulderSearchUntil = 0
 			postBoulderLoot = nil
 			postBoulderGrabClock = 0
-			postBoulderGrabStarted = 0
 			statusText = "Starting"
 
 			Move.setFly(false)
@@ -5092,18 +5061,7 @@ do
 
 		Connections.farmConn = Services.RunService.Heartbeat:Connect(function(deltaTime)
 			if active then
-				local farmNow = os.clock()
-				-- Auto Rejoin timer: when Auto Rejoin is enabled, restart the server
-				-- after Auto Farm has been running for 7 minutes.
-				if autoRejoin and autoRejoinFarmStarted > 0 and farmNow - autoRejoinFarmStarted >= AUTO_REJOIN_FARM_TIME then
-					statusText = "7 minutes reached - rejoining server"
-					Library:Notify("Auto Farm reached 7 minutes - rejoining", 4)
-					stop()
-					restart()
-					return
-				end
-
-				if firstRunDelayUntil > 0 and farmNow < firstRunDelayUntil then
+				if firstRunDelayUntil > 0 and os.clock() < firstRunDelayUntil then
 					statusText = string.format("Starting Boulder Farm in %.1fs", firstRunDelayUntil - os.clock())
 				else
 					firstRunDelayUntil = 0
@@ -5268,8 +5226,6 @@ do
 		local blacklistedColumns = {}
 		local target
 		local columnY
-		local peakY
-		local MINING_DEPTH_RATIO = 0.20 -- mine only top 20% of mountain height
 		local columnDry = 0
 		local columnSwings = 0
 		local surfaceClock = 0
@@ -5910,22 +5866,6 @@ do
 
 					columnSwings = 0
 					columnY = spot.Y
-					-- Only mine down through the top 20% of the mountain's actual height.
-					-- Use the detected peak as the top and the live mountain base as the bottom;
-					-- do not use a fixed 600-stud height.
-					if peakY then
-						local baseY = zoneBase()
-						local mountainHeight = math.max(0, peakY - baseY)
-						local minMiningY = peakY - (mountainHeight * MINING_DEPTH_RATIO)
-						if spot.Y < minMiningY then
-							blacklistedColumns[gridKey(target.X, target.Z)] = now + 20
-							target = nil
-							columnY = nil
-							columnDry = 0
-							columnSwings = 0
-							return
-						end
-					end
 					target = spot
 
 					if columnDry >= COLUMN_DRY then
@@ -5954,7 +5894,6 @@ do
 				end
 
 				target = spot
-				peakY = spot.Y
 				columnY = spot.Y
 				columnDry = 0
 				columnSwings = 0
