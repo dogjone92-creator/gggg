@@ -5910,21 +5910,13 @@ do
 
 					columnSwings = 0
 					columnY = spot.Y
-					-- Only mine down through the top 20% of the mountain's actual height.
-					-- Use the detected peak as the top and the live mountain base as the bottom;
-					-- do not use a fixed 600-stud height.
-					if peakY then
-						local baseY = zoneBase()
-						local mountainHeight = math.max(0, peakY - baseY)
-						local minMiningY = peakY - (mountainHeight * MINING_DEPTH_RATIO)
-						if spot.Y < minMiningY then
-							blacklistedColumns[gridKey(target.X, target.Z)] = now + 20
-							target = nil
-							columnY = nil
-							columnDry = 0
-							columnSwings = 0
-							return
-						end
+					if peakY and spot.Y < (peakY - (600 * MINING_DEPTH_RATIO)) then
+						blacklistedColumns[gridKey(target.X, target.Z)] = now + 20
+						target = nil
+						columnY = nil
+						columnDry = 0
+						columnSwings = 0
+						return
 					end
 					target = spot
 
